@@ -8,6 +8,7 @@ export const orchestratorPaths = {
   config: (r: string) => join(r, DIR, 'config.json'),
   state: (r: string) => join(r, DIR, 'state.json'),
   tasks: (r: string) => join(r, DIR, 'tasks.json'),
+  repos: (r: string) => join(r, DIR, 'repos.json'),
   runs: (r: string) => join(r, DIR, 'runs'),
   logs: (r: string) => join(r, DIR, 'logs'),
   prompts: (r: string) => join(r, DIR, 'prompts'),

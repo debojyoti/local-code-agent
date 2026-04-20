@@ -449,6 +449,225 @@ Review focus:
 - Is the viewer read-only and lightweight?
 - Did Claude avoid letting the viewer distort the core architecture?
 
+## Step 14
+
+Goal: add explicit workspace support without changing execution yet.
+
+Claude prompt:
+
+```md
+You are implementing Step 14 from `claude-task-plan.md`.
+
+Add a grounded workspace model so the orchestrator can target a directory that contains multiple git repos.
+
+Requirements:
+- Add a simple workspace manifest such as `.ai-orchestrator/repos.json`
+- Support a workspace root that is not itself a git repository
+- Extend `doctor` so it can validate either:
+  - a single repo path
+  - or a workspace root containing multiple child repos
+- Print clear diagnostics for detected repos and missing repos
+- Keep single-repo behavior working
+- Do not change task execution yet
+- Do not implement cross-repo planning yet
+- Keep it grounded and do not overcomplicate it
+
+Deliverable:
+- A minimal workspace foundation and doctor support for multi-repo projects
+```
+
+Review focus:
+
+- Is the workspace model explicit and small?
+- Does `doctor` clearly handle both single-repo and workspace-root paths?
+- Did Claude avoid prematurely changing executor/planner logic?
+
+## Step 15
+
+Goal: add multi-repo-aware schemas and task metadata.
+
+Claude prompt:
+
+```md
+You are implementing Step 15 from `claude-task-plan.md`.
+
+Extend the orchestrator state and task model to support tasks that belong to different repos inside one workspace.
+
+Requirements:
+- Add a `repo_id` field to tasks
+- Add typed schema support for the workspace manifest and repo entries
+- Keep one top-level `tasks.json` for orchestration order
+- Keep backwards compatibility for single-repo mode where practical
+- Add path helpers for resolving a task's target repo from `repo_id`
+- Do not change the planner prompt yet
+- Do not change executor behavior yet
+- Keep it grounded and do not overcomplicate it
+
+Deliverable:
+- A clean schema/state layer that can represent single-repo and multi-repo tasks
+```
+
+Review focus:
+
+- Is `repo_id` integrated cleanly?
+- Does the model stay simple?
+- Is single-repo behavior still supported?
+
+## Step 16
+
+Goal: make planning workspace-aware and let Codex generate tasks across repos.
+
+Claude prompt:
+
+```md
+You are implementing Step 16 from `claude-task-plan.md`.
+
+Extend planning so Codex can analyze a workspace root containing multiple repos and generate tasks for multiple repos.
+
+Requirements:
+- Inspect each declared repo in the workspace manifest
+- Build a planning prompt that includes per-repo context
+- Make it explicit to Codex that each task must include `repo_id`
+- Save normalized tasks with `repo_id` into the shared `tasks.json`
+- Keep task ordering and dependency handling straightforward
+- Keep single-repo planning working
+- Do not change execution yet
+- Keep it grounded and do not overcomplicate it
+
+Deliverable:
+- A planning flow that can produce a shared multi-repo task list
+```
+
+Review focus:
+
+- Is repo context clearly separated in the planning prompt?
+- Are planned tasks validated with `repo_id`?
+- Did Claude avoid creating an overly abstract planner framework?
+
+## Step 17
+
+Goal: make single-task execution repo-aware.
+
+Claude prompt:
+
+```md
+You are implementing Step 17 from `claude-task-plan.md`.
+
+Extend single-task execution so each task runs in the repo identified by its `repo_id`.
+
+Requirements:
+- Resolve the task's target repo from the workspace manifest
+- Create the worktree in the correct repo
+- Run Claude in the correct repo worktree
+- Run local checks using the correct repo context
+- Keep artifact/state storage centralized under the workspace root
+- Keep single-repo execution working
+- Do not change full orchestration yet
+- Keep it grounded and do not overcomplicate it
+
+Deliverable:
+- Repo-aware `run-task` and single-task execute/review support
+```
+
+Review focus:
+
+- Does task execution happen in the correct repo?
+- Are artifacts still traceable from the workspace root?
+- Is the repo-resolution logic explicit and easy to inspect?
+
+## Step 18
+
+Goal: make full orchestration and resume work across repos.
+
+Claude prompt:
+
+```md
+You are implementing Step 18 from `claude-task-plan.md`.
+
+Extend full orchestration so `run` and `resume` can execute tasks across multiple repos in one workspace.
+
+Requirements:
+- Reuse the existing single-task loop
+- Respect task dependencies across repos
+- Keep one shared top-level orchestration state under the workspace root
+- Ensure resume still resets stuck tasks safely
+- Print clear terminal summaries that include each task's `repo_id`
+- Keep single-repo orchestration working
+- Do not redesign the control flow into a generic workflow engine
+- Keep it grounded and do not overcomplicate it
+
+Deliverable:
+- End-to-end multi-repo run/resume support
+```
+
+Review focus:
+
+- Does orchestration remain readable after adding multi-repo support?
+- Are dependency checks still deterministic across repos?
+- Is resume safe and conservative?
+
+## Step 19
+
+Goal: make audit, report, and viewer workspace-aware.
+
+Claude prompt:
+
+```md
+You are implementing Step 19 from `claude-task-plan.md`.
+
+Extend audit, report, and the optional viewer so they work cleanly for a multi-repo workspace.
+
+Requirements:
+- Include `repo_id` in report output where relevant
+- Make audit prompts aware of multiple repos
+- Keep reports human-readable and not too noisy
+- Update the optional viewer to show which repo each task belongs to
+- Keep artifacts and summaries rooted at the workspace level
+- Preserve single-repo behavior
+- Keep it grounded and do not overcomplicate it
+
+Deliverable:
+- Workspace-aware audit/report/viewer support
+```
+
+Review focus:
+
+- Are reports still readable after adding repo context?
+- Does audit use the right workspace artifacts?
+- Is the viewer still lightweight?
+
+## Step 20
+
+Goal: document workspace and multi-repo usage thoroughly.
+
+Claude prompt:
+
+```md
+You are implementing Step 20 from `claude-task-plan.md`.
+
+Update the documentation for workspace and multi-repo usage.
+
+Requirements:
+- Add README guidance for:
+  - workspace roots
+  - `.ai-orchestrator/repos.json`
+  - multi-repo planning
+  - multi-repo execution and resume
+- Include concrete examples
+- Keep the docs practical and terminal-first
+- Do not add speculative future architecture notes
+- Keep it grounded and do not overcomplicate it
+
+Deliverable:
+- Clear docs for using the orchestrator across multiple repos
+```
+
+Review focus:
+
+- Can a user follow the docs without guessing?
+- Are the examples aligned with the implemented behavior?
+- Did Claude keep the docs practical rather than theoretical?
+
 ## What To Send Me After Each Step
 
 Send me:
