@@ -4,6 +4,7 @@ import { resolve } from 'path';
 import { runDoctor } from '../core/doctor.js';
 import { runPlan } from '../planner/index.js';
 import { runTask } from '../executor/index.js';
+import { runReview } from '../review/index.js';
 import { orchestratorPaths } from '../state/paths.js';
 
 const program = new Command();
@@ -121,10 +122,58 @@ program
 program
   .command('review')
   .description('Run Codex review for an existing task')
-  .option('--repo <path>', 'Path to target repository')
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
   .option('--task <id>', 'Task ID to review')
-  .action(() => {
-    console.log('review: not yet implemented');
+  .action(async (opts: { repo?: string; task?: string }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+    const taskId = opts.task;
+
+    if (!taskId) {
+      console.error('review: --task <id> is required');
+      process.exit(1);
+    }
+
+    console.log(`\nOrchestrator Review\n` + '─'.repeat(40));
+    console.log(`  repo: ${repoRoot}`);
+    console.log(`  task: ${taskId}\n`);
+
+    try {
+      const result = await runReview(repoRoot, taskId);
+      const r = result.reviewResult;
+
+      console.log(`\nReview complete\n` + '─'.repeat(40));
+      console.log(`  Verdict:    ${r.verdict}`);
+      console.log(`  Confidence: ${(r.confidence * 100).toFixed(0)}%`);
+      console.log(`  Status:     ${result.task.status}`);
+      console.log(`  Summary:    ${r.summary}`);
+
+      if (r.acceptance_checklist.length > 0) {
+        console.log(`\nAcceptance checklist:`);
+        for (const item of r.acceptance_checklist) {
+          const mark = item.passed ? '✓' : '✗';
+          console.log(`  ${mark} ${item.criterion}`);
+        }
+      }
+
+      if (r.issues_found.length > 0) {
+        console.log(`\nIssues found:`);
+        for (const issue of r.issues_found) {
+          console.log(`  - ${issue}`);
+        }
+      }
+
+      if (r.verdict === 'REVISE' && r.fix_brief) {
+        console.log(`\nFix brief:\n${r.fix_brief.split('\n').map((l) => `  ${l}`).join('\n')}`);
+      }
+
+      console.log(`\n  Prompt:        ${result.promptPath}`);
+      console.log(`  Raw output:    ${result.rawOutputPath}`);
+      console.log(`  Review result: ${result.reviewResultPath}`);
+      console.log('');
+    } catch (err) {
+      console.error(`\nreview failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
   });
 
 program
