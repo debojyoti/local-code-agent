@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { resolve } from 'path';
+import { readFile } from 'fs/promises';
 import { runDoctor } from '../core/doctor.js';
 import { runPlan } from '../planner/index.js';
+import { runPlanRefine } from '../planner/refine.js';
 import { runTask } from '../executor/index.js';
 import { runReview } from '../review/index.js';
 import { runTaskLoop } from '../executor/loop.js';
@@ -71,6 +73,56 @@ program
       console.log('');
     } catch (err) {
       console.error(`\nplan failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('plan-refine')
+  .description('Refine the existing plan with additional feedback using Codex CLI')
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
+  .option('--feedback <text>', 'Inline feedback text')
+  .option('--feedback-file <path>', 'Path to a file containing feedback')
+  .action(async (opts: { repo?: string; feedback?: string; feedbackFile?: string }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+
+    let feedback: string;
+    if (opts.feedbackFile) {
+      try {
+        feedback = await readFile(resolve(opts.feedbackFile), 'utf8');
+      } catch {
+        console.error(`plan-refine: cannot read feedback file: ${opts.feedbackFile}`);
+        process.exit(1);
+      }
+    } else if (opts.feedback) {
+      feedback = opts.feedback;
+    } else {
+      console.error('plan-refine: --feedback <text> or --feedback-file <path> is required');
+      process.exit(1);
+    }
+
+    console.log('\nOrchestrator Plan Refine\n' + '─'.repeat(40));
+    console.log(`  repo: ${repoRoot}\n`);
+
+    try {
+      const result = await runPlanRefine(repoRoot, { feedback });
+
+      console.log('\nPlan refined\n' + '─'.repeat(40));
+      console.log(`  Tasks saved: ${result.tasksPath}`);
+      console.log(`  Prompt:      ${result.promptArtifactPath}`);
+      console.log(`  Raw output:  ${result.rawOutputArtifactPath}`);
+      console.log(`\nChanges:`);
+      console.log(`  Added:   ${result.added.length > 0 ? result.added.join(', ') : '(none)'}`);
+      console.log(`  Removed: ${result.removed.length > 0 ? result.removed.join(', ') : '(none)'}`);
+      console.log(`  Kept:    ${result.kept.length} task(s)`);
+      console.log(`\nTasks (${result.tasks.length}):`);
+      for (const task of result.tasks) {
+        const deps = task.dependencies.length > 0 ? ` [deps: ${task.dependencies.join(', ')}]` : '';
+        console.log(`  ${task.id}  ${task.title}${deps}`);
+      }
+      console.log('');
+    } catch (err) {
+      console.error(`\nplan-refine failed: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
   });
