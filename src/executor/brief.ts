@@ -17,7 +17,7 @@ export function buildImplementationBrief(
   sections.push(`## Context
 You are implementing a single focused task in an isolated git worktree.
 Worktree path: ${worktree.worktreePath}
-Branch: ${worktree.branch}
+Git mode: detached worktree (no task branch)
 
 Do not modify files outside the allowed list.
 Do not refactor unrelated code.

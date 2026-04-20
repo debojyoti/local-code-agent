@@ -5,12 +5,6 @@ import { orchestratorPaths } from '../state/paths.js';
 import { readJson, writeJson } from '../state/persist.js';
 import { z } from 'zod';
 
-// ─── Naming ──────────────────────────────────────────────────────────────────
-
-export function taskBranchName(taskId: string): string {
-  return `orch/${taskId}`;
-}
-
 export function taskWorktreePath(repoRoot: string, taskId: string): string {
   return join(orchestratorPaths.worktrees(repoRoot), taskId);
 }
@@ -20,14 +14,12 @@ export function taskWorktreePath(repoRoot: string, taskId: string): string {
 export interface WorktreeInfo {
   taskId: string;
   worktreePath: string;
-  branch: string;
   baseSha: string;
 }
 
 const WorktreeInfoSchema = z.object({
   taskId: z.string(),
   worktreePath: z.string(),
-  branch: z.string(),
   baseSha: z.string(),
 });
 
@@ -41,24 +33,18 @@ export async function createWorktree(
   repoRoot: string,
   taskId: string,
 ): Promise<WorktreeInfo> {
-  const branch = taskBranchName(taskId);
   const wtPath = taskWorktreePath(repoRoot, taskId);
   const metaPath = worktreeMetaPath(repoRoot, taskId);
 
-  // Resume: metadata already exists — verify the recorded worktree and branch still exist
+  // Resume: metadata already exists — verify the recorded worktree still exists
   const existing = await readJson(metaPath, WorktreeInfoSchema);
   if (existing) {
-    const [wtCheck, branchCheck] = await Promise.all([
-      runCommand('git', ['-C', existing.worktreePath, 'rev-parse', '--git-dir']),
-      runCommand('git', ['-C', repoRoot, 'branch', '--list', existing.branch]),
-    ]);
+    const wtCheck = await runCommand('git', ['-C', existing.worktreePath, 'rev-parse', '--git-dir']);
     const worktreeExists = wtCheck.ok;
-    const branchExists = branchCheck.stdout.trim() !== '';
-    if (!worktreeExists || !branchExists) {
+    if (!worktreeExists) {
       throw new Error(
         `Stale worktree metadata for ${taskId}: ` +
-          `worktree ${worktreeExists ? 'ok' : 'missing'}, ` +
-          `branch ${branchExists ? 'ok' : 'missing'}. ` +
+          `worktree missing. ` +
           `Remove ${metaPath} and re-run to recreate the worktree.`,
       );
     }
@@ -74,29 +60,20 @@ export async function createWorktree(
 
   await mkdir(orchestratorPaths.worktrees(repoRoot), { recursive: true });
 
-  // Create a branch at HEAD for this task
-  const branchResult = await runCommand('git', ['-C', repoRoot, 'branch', branch, baseSha]);
-  if (!branchResult.ok) {
-    throw new Error(`Failed to create branch ${branch}: ${branchResult.stderr}`);
-  }
-
-  // Attach a worktree to that branch
+  // Attach a detached worktree at the current repo HEAD without creating a task branch.
   const wtResult = await runCommand('git', [
-    '-C', repoRoot, 'worktree', 'add', wtPath, branch,
+    '-C', repoRoot, 'worktree', 'add', '--detach', wtPath, baseSha,
   ]);
   if (!wtResult.ok) {
-    // Clean up the dangling branch before surfacing the error
-    await runCommand('git', ['-C', repoRoot, 'branch', '-D', branch]);
     throw new Error(`Failed to create worktree at ${wtPath}: ${wtResult.stderr}`);
   }
 
-  const info: WorktreeInfo = { taskId, worktreePath: wtPath, branch, baseSha };
+  const info: WorktreeInfo = { taskId, worktreePath: wtPath, baseSha };
   await writeJson(metaPath, info);
   return info;
 }
 
 export async function removeWorktree(repoRoot: string, taskId: string): Promise<void> {
-  const branch = taskBranchName(taskId);
   const wtPath = taskWorktreePath(repoRoot, taskId);
 
   const removeResult = await runCommand('git', [
@@ -106,8 +83,6 @@ export async function removeWorktree(repoRoot: string, taskId: string): Promise<
     // Worktree may already be gone; prune to keep git's internal list consistent
     await runCommand('git', ['-C', repoRoot, 'worktree', 'prune']);
   }
-
-  await runCommand('git', ['-C', repoRoot, 'branch', '-D', branch]);
 
   const metaPath = worktreeMetaPath(repoRoot, taskId);
   try {

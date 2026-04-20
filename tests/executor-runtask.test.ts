@@ -75,7 +75,6 @@ describe('runTask', () => {
   const fakeWorktree = {
     taskId: 'TASK-001',
     worktreePath: '/fake/worktree/TASK-001',
-    branch: 'orch/TASK-001',
     baseSha: 'deadbeef',
   };
 

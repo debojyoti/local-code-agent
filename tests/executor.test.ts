@@ -33,7 +33,6 @@ const makeTask = (overrides: Partial<Task> = {}): Task => ({
 const worktree: WorktreeInfo = {
   taskId: 'TASK-001',
   worktreePath: '/tmp/repo/.ai-orchestrator/worktrees/TASK-001',
-  branch: 'orch/TASK-001',
   baseSha: 'abc1234def5678',
 };
 
@@ -46,10 +45,10 @@ describe('buildImplementationBrief', () => {
     expect(brief).toContain('Add authentication');
   });
 
-  test('includes worktree path and branch', () => {
+  test('includes worktree path and detached worktree mode', () => {
     const brief = buildImplementationBrief(makeTask(), worktree);
     expect(brief).toContain(worktree.worktreePath);
-    expect(brief).toContain(worktree.branch);
+    expect(brief).toContain('detached worktree');
   });
 
   test('includes acceptance criteria', () => {

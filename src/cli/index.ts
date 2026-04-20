@@ -9,6 +9,7 @@ import { runTaskLoop } from '../executor/loop.js';
 import { orchestratorPaths } from '../state/paths.js';
 import { runOrchestration } from '../core/orchestrator.js';
 import { runAudit, generateReport } from '../reporting/index.js';
+import { startViewer } from '../viewer/index.js';
 
 const program = new Command();
 
@@ -342,6 +343,25 @@ program
       console.log('');
     } catch (err) {
       console.error(`\nreport failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('viewer')
+  .description('Start a read-only local viewer for orchestrator state and artifacts')
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
+  .option('--port <number>', 'Port to listen on (default: 7842)', '7842')
+  .action(async (opts: { repo?: string; port?: string }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+    const port = parseInt(opts.port ?? '7842', 10);
+
+    console.log('\nOrchestrator Viewer\n' + '─'.repeat(40));
+
+    try {
+      await startViewer(repoRoot, { port });
+    } catch (err) {
+      console.error(`\nviewer failed: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
   });
