@@ -144,6 +144,8 @@ export const FinalReportSchema = z.object({
       status: TaskStatusSchema,
       retry_count: z.number().int(),
       verdict: ReviewVerdictSchema.nullable(),
+      // Workspace-mode tasks carry the repo they belong to. Absent in single-repo runs.
+      repo_id: z.string().optional(),
     }),
   ),
   audit_summary: z.string().default(''),

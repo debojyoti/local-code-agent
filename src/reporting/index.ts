@@ -5,6 +5,7 @@ import { orchestratorPaths } from '../state/paths.js';
 import { readJson, writeJson } from '../state/persist.js';
 import { TaskListSchema, ReviewResultSchema, FinalReportSchema, type Task, type ReviewResult, type FinalReport } from '../state/schemas.js';
 import { saveArtifact, appendLog } from '../artifacts/index.js';
+import { isWorkspaceRoot, readWorkspaceManifest, resolveRepoPath, type WorkspaceManifest } from '../workspace/index.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,8 @@ export async function runAudit(repoRoot: string): Promise<AuditResult> {
     throw new Error(`No tasks found — run 'orchestrator plan' first`);
   }
 
-  const prompt = buildAuditPrompt(resolvedRepo, infos);
+  const manifest = await loadManifestIfWorkspace(resolvedRepo);
+  const prompt = buildAuditPrompt(resolvedRepo, infos, manifest);
   const promptPath = await saveArtifact(resolvedRepo, 'prompts', null, 'audit-prompt.md', prompt);
   console.log(`  Audit prompt saved: ${promptPath}`);
 
@@ -79,6 +81,8 @@ export async function generateReport(repoRoot: string, auditSummary = ''): Promi
     throw new Error(`No tasks found — run 'orchestrator plan' first`);
   }
 
+  const manifest = await loadManifestIfWorkspace(resolvedRepo);
+
   const passed  = infos.filter((i) => i.task.status === 'passed').length;
   const failed  = infos.filter((i) => i.task.status === 'failed').length;
   const blocked = infos.filter((i) => i.task.status === 'blocked').length;
@@ -99,6 +103,7 @@ export async function generateReport(repoRoot: string, auditSummary = ''): Promi
       status: i.task.status,
       retry_count: i.task.retry_count,
       verdict: i.latestReview?.verdict ?? null,
+      ...(i.task.repo_id ? { repo_id: i.task.repo_id } : {}),
     })),
     audit_summary: auditSummary,
   };
@@ -107,7 +112,7 @@ export async function generateReport(repoRoot: string, auditSummary = ''): Promi
   const reportJsonPath = join(reportDir, 'final-report.json');
   await writeJson(reportJsonPath, finalReport);
 
-  const markdown = buildReportMarkdown(finalReport, infos);
+  const markdown = buildReportMarkdown(finalReport, infos, manifest);
   const reportPath = await saveArtifact(resolvedRepo, 'reports', null, 'report.md', markdown);
   console.log(`  Report saved: ${reportPath}`);
 
@@ -118,12 +123,32 @@ export async function generateReport(repoRoot: string, auditSummary = ''): Promi
 
 // ─── Audit prompt ─────────────────────────────────────────────────────────────
 
-function buildAuditPrompt(repoRoot: string, infos: TaskAuditInfo[]): string {
+export function buildAuditPrompt(
+  repoRoot: string,
+  infos: TaskAuditInfo[],
+  manifest: WorkspaceManifest | null = null,
+): string {
+  const isWorkspace = manifest !== null;
+
   const rows = infos.map((i) => {
     const verdict = i.latestReview?.verdict ?? 'n/a';
     const retries = i.task.retry_count;
+    if (isWorkspace) {
+      const repoId = i.task.repo_id ?? '—';
+      return `| ${i.task.id} | ${repoId} | ${i.task.title} | ${i.task.status} | ${retries} | ${verdict} |`;
+    }
     return `| ${i.task.id} | ${i.task.title} | ${i.task.status} | ${retries} | ${verdict} |`;
   });
+
+  const tableHeader = isWorkspace
+    ? [
+        `| ID | Repo | Title | Status | Retries | Final Verdict |`,
+        `|----|------|-------|--------|---------|---------------|`,
+      ].join('\n')
+    : [
+        `| ID | Title | Status | Retries | Final Verdict |`,
+        `|----|-------|--------|---------|---------------|`,
+      ].join('\n');
 
   const problemTasks = infos.filter(
     (i) => i.task.status === 'blocked' || i.task.status === 'failed',
@@ -136,17 +161,36 @@ function buildAuditPrompt(repoRoot: string, infos: TaskAuditInfo[]): string {
         const issueText = issues.length > 0
           ? issues.map((x) => `  - ${x}`).join('\n')
           : '  (no review issues recorded)';
-        return `**${i.task.id} — ${i.task.title}** (${i.task.status})\n${issueText}`;
+        const repoTag = i.task.repo_id ? ` [${i.task.repo_id}]` : '';
+        return `**${i.task.id}${repoTag} — ${i.task.title}** (${i.task.status})\n${issueText}`;
       }).join('\n\n');
 
-  return `You are auditing the final state of a repository after an automated implementation run.
+  // In workspace mode, print a short list of declared repos so Codex can reason
+  // about which repo each task belongs to without dumping full context.
+  const repoSection = isWorkspace
+    ? [
+        `## Workspace`,
+        `Root: ${repoRoot}`,
+        ``,
+        `Declared repositories:`,
+        ...manifest!.repos.map((r) => {
+          const absPath = resolveRepoPath(repoRoot, r);
+          const desc = r.description ? ` — ${r.description}` : '';
+          return `- **${r.id}**: ${absPath}${desc}`;
+        }),
+      ].join('\n')
+    : `## Repository\n${repoRoot}`;
 
-## Repository
-${repoRoot}
+  const repoIdNote = isWorkspace
+    ? `Tasks may span multiple repositories. The \`Repo\` column identifies which repo each task belongs to. Evaluate the workspace as a whole.\n\n`
+    : '';
+
+  return `You are auditing the final state of ${isWorkspace ? 'a multi-repo workspace' : 'a repository'} after an automated implementation run.
+
+${repoSection}
 
 ## Task Results
-| ID | Title | Status | Retries | Final Verdict |
-|----|-------|--------|---------|---------------|
+${repoIdNote}${tableHeader}
 ${rows.join('\n')}
 
 ## Blocked / Failed Tasks
@@ -224,14 +268,23 @@ function normalizeOverall(value: unknown): AuditResult['overall'] {
 
 // ─── Markdown report ──────────────────────────────────────────────────────────
 
-function buildReportMarkdown(report: FinalReport, infos: TaskAuditInfo[]): string {
+function buildReportMarkdown(
+  report: FinalReport,
+  infos: TaskAuditInfo[],
+  manifest: WorkspaceManifest | null = null,
+): string {
   const date = new Date(report.generated_at).toUTCString();
+  const isWorkspace = manifest !== null;
   const lines: string[] = [];
 
   lines.push(`# Orchestration Report`);
   lines.push('');
   lines.push(`- **Generated:** ${date}`);
-  lines.push(`- **Repository:** ${report.repo_path}`);
+  if (isWorkspace) {
+    lines.push(`- **Workspace root:** ${report.repo_path}`);
+  } else {
+    lines.push(`- **Repository:** ${report.repo_path}`);
+  }
   lines.push('');
 
   lines.push(`## Summary`);
@@ -243,6 +296,23 @@ function buildReportMarkdown(report: FinalReport, infos: TaskAuditInfo[]): strin
   lines.push(`| Failed | ${report.failed} |`);
   lines.push(`| Blocked | ${report.blocked} |`);
   lines.push('');
+
+  // Per-repo summary — only when workspace mode is active.
+  if (isWorkspace) {
+    lines.push(`## Repositories`);
+    lines.push('');
+    lines.push(`| Repo | Path | Tasks | Passed | Failed | Blocked |`);
+    lines.push(`|------|------|-------|--------|--------|---------|`);
+    for (const r of manifest!.repos) {
+      const absPath = resolveRepoPath(report.repo_path, r);
+      const repoTasks = infos.filter((i) => i.task.repo_id === r.id);
+      const p = repoTasks.filter((i) => i.task.status === 'passed').length;
+      const f = repoTasks.filter((i) => i.task.status === 'failed').length;
+      const b = repoTasks.filter((i) => i.task.status === 'blocked').length;
+      lines.push(`| ${r.id} | ${absPath} | ${repoTasks.length} | ${p} | ${f} | ${b} |`);
+    }
+    lines.push('');
+  }
 
   if (report.audit_summary) {
     lines.push(`## Audit`);
@@ -258,9 +328,13 @@ function buildReportMarkdown(report: FinalReport, infos: TaskAuditInfo[]): strin
   for (const summary of report.task_summaries) {
     const info = infoById.get(summary.id);
     const review = info?.latestReview ?? null;
+    const repoTag = summary.repo_id ? ` [${summary.repo_id}]` : '';
 
-    lines.push(`### ${summary.id}: ${summary.title}`);
+    lines.push(`### ${summary.id}${repoTag}: ${summary.title}`);
     lines.push('');
+    if (summary.repo_id) {
+      lines.push(`- **Repo:** ${summary.repo_id}`);
+    }
     lines.push(`- **Status:** ${summary.status}`);
     lines.push(`- **Retries:** ${summary.retry_count}`);
     lines.push(`- **Final verdict:** ${summary.verdict ?? 'n/a'}`);
@@ -290,6 +364,17 @@ function buildReportMarkdown(report: FinalReport, infos: TaskAuditInfo[]): strin
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Load the workspace manifest when one exists. Returns null **only** when there
+ * is no `repos.json` at all (single-repo mode). If the manifest file is present
+ * but malformed, the underlying read/validate error is propagated so audit and
+ * report fail loudly instead of silently treating the workspace as a single repo.
+ */
+async function loadManifestIfWorkspace(root: string): Promise<WorkspaceManifest | null> {
+  if (!(await isWorkspaceRoot(root))) return null;
+  return readWorkspaceManifest(root);
 }
 
 // ─── Data loading ─────────────────────────────────────────────────────────────

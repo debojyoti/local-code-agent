@@ -68,7 +68,7 @@ export async function startViewer(repoRoot: string, opts: ViewerOptions = {}): P
 
 // ─── Pages ────────────────────────────────────────────────────────────────────
 
-async function renderOverview(repoRoot: string): Promise<string> {
+export async function renderOverview(repoRoot: string): Promise<string> {
   const [taskList, state] = await Promise.all([
     readJson(orchestratorPaths.tasks(repoRoot), TaskListSchema),
     readJson(orchestratorPaths.state(repoRoot), StateSchema),
@@ -82,28 +82,40 @@ async function renderOverview(repoRoot: string): Promise<string> {
     return page('Tasks', `${statusLine}<p><em>No tasks found.</em></p>`);
   }
 
-  const rows = taskList.tasks.map((t) => `
+  // Show the Repo column only when at least one task carries a repo_id.
+  // This keeps single-repo output identical to before.
+  const showRepoColumn = taskList.tasks.some((t) => t.repo_id);
+
+  const rows = taskList.tasks.map((t) => {
+    const repoCell = showRepoColumn ? `<td>${t.repo_id ? esc(t.repo_id) : '&mdash;'}</td>` : '';
+    return `
     <tr>
       <td><a href="/task/${encodeURIComponent(t.id)}">${esc(t.id)}</a></td>
+      ${repoCell}
       <td>${esc(t.title)}</td>
       <td>${badge(t.status)}</td>
       <td>${t.retry_count}</td>
       <td>${t.dependencies.length > 0 ? esc(t.dependencies.join(', ')) : '&mdash;'}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+
+  const headerCells = showRepoColumn
+    ? '<th>ID</th><th>Repo</th><th>Title</th><th>Status</th><th>Retries</th><th>Dependencies</th>'
+    : '<th>ID</th><th>Title</th><th>Status</th><th>Retries</th><th>Dependencies</th>';
 
   const body = `
     <h1>Task Overview</h1>
     ${statusLine}
     <p>${summaryCounts(taskList.tasks)}</p>
     <table>
-      <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Retries</th><th>Dependencies</th></tr></thead>
+      <thead><tr>${headerCells}</tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 
   return page('Tasks', body);
 }
 
-async function renderTaskDetail(repoRoot: string, taskId: string): Promise<string> {
+export async function renderTaskDetail(repoRoot: string, taskId: string): Promise<string> {
   const taskList = await readJson(orchestratorPaths.tasks(repoRoot), TaskListSchema);
   const task = taskList?.tasks.find((t) => t.id === taskId);
 
@@ -121,8 +133,14 @@ async function renderTaskDetail(repoRoot: string, taskId: string): Promise<strin
     ? `<h2>Acceptance Criteria</h2><ul>${task.acceptance_criteria.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>`
     : '';
 
+  // When in workspace mode, surface the task's repo near the status.
+  const repoLine = task.repo_id
+    ? `<p>Repo: <strong>${esc(task.repo_id)}</strong></p>`
+    : '';
+
   const body = `
     <h1>${esc(task.id)}: ${esc(task.title)}</h1>
+    ${repoLine}
     <p>${badge(task.status)} &nbsp; Retries: ${task.retry_count}&thinsp;/&thinsp;${task.max_retries}</p>
     <h2>Goal</h2>
     <p>${esc(task.goal)}</p>
