@@ -7,6 +7,7 @@ import { runTask } from '../executor/index.js';
 import { runReview } from '../review/index.js';
 import { runTaskLoop } from '../executor/loop.js';
 import { orchestratorPaths } from '../state/paths.js';
+import { runOrchestration } from '../core/orchestrator.js';
 
 const program = new Command();
 
@@ -74,10 +75,32 @@ program
 
 program
   .command('run')
-  .description('Run all pending tasks in order')
-  .option('--repo <path>', 'Path to target repository')
-  .action(() => {
-    console.log('run: not yet implemented');
+  .description('Run all pending tasks in dependency order')
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
+  .action(async (opts: { repo?: string }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+
+    console.log('\nOrchestrator Run\n' + '─'.repeat(40));
+    console.log(`  repo: ${repoRoot}\n`);
+
+    try {
+      const result = await runOrchestration(repoRoot, false);
+
+      console.log('\n' + '─'.repeat(50));
+      console.log('  Run complete');
+      console.log('─'.repeat(50));
+      console.log(`  Total:   ${result.total}`);
+      console.log(`  Passed:  ${result.passed}`);
+      console.log(`  Failed:  ${result.failed}`);
+      console.log(`  Blocked: ${result.blocked}`);
+      console.log(`  Skipped: ${result.skipped}`);
+      console.log('');
+
+      if (result.failed > 0 || result.blocked > 0) process.exit(1);
+    } catch (err) {
+      console.error(`\nrun failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
   });
 
 program
@@ -231,9 +254,31 @@ program
 program
   .command('resume')
   .description('Continue from persisted state')
-  .option('--repo <path>', 'Path to target repository')
-  .action(() => {
-    console.log('resume: not yet implemented');
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
+  .action(async (opts: { repo?: string }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+
+    console.log('\nOrchestrator Resume\n' + '─'.repeat(40));
+    console.log(`  repo: ${repoRoot}\n`);
+
+    try {
+      const result = await runOrchestration(repoRoot, true);
+
+      console.log('\n' + '─'.repeat(50));
+      console.log('  Resume complete');
+      console.log('─'.repeat(50));
+      console.log(`  Total:   ${result.total}`);
+      console.log(`  Passed:  ${result.passed}`);
+      console.log(`  Failed:  ${result.failed}`);
+      console.log(`  Blocked: ${result.blocked}`);
+      console.log(`  Skipped: ${result.skipped}`);
+      console.log('');
+
+      if (result.failed > 0 || result.blocked > 0) process.exit(1);
+    } catch (err) {
+      console.error(`\nresume failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
   });
 
 program
