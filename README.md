@@ -282,6 +282,25 @@ Single-repo usage is unchanged. Workspace mode is additive.
 
 The CLI auto-detects workspace mode by looking for `.ai-orchestrator/repos.json` under the `--repo` path. If present, the orchestrator treats that path as a workspace root.
 
+### Initialize a workspace
+
+The fastest way to bootstrap a multi-repo workspace is:
+
+```bash
+npm run dev -- init-workspace --repo /path/to/workspace --repos "frontend=./frontend,backend=./backend,shared=./shared"
+```
+
+This creates:
+- `.ai-orchestrator/repos.json`
+- `.ai-orchestrator/spec.md`
+- workspace-level folders for logs, prompts, artifacts, reviews, reports, runs, and worktrees
+
+If `repos.json` or `spec.md` already exists, the command fails loudly unless you pass `--force`:
+
+```bash
+npm run dev -- init-workspace --repo /path/to/workspace --repos "frontend=./frontend,backend=./backend" --force
+```
+
 ### Workspace layout
 
 ```text
@@ -324,6 +343,8 @@ Declare each child repo with an `id`, a `path` (relative to the workspace root o
 - `id` is the value tasks use to target a repo. Keep it short and stable.
 - `path` may be relative (resolved against the workspace root) or absolute.
 - Each declared path must be an actual git repository — `doctor` validates this.
+
+If you used `init-workspace`, this file is generated for you and you can edit it after bootstrap.
 
 ### Workspace `spec.md`
 
@@ -454,7 +475,7 @@ npm run dev -- viewer --repo /path/to/workspace --port 7842
 ### Full workspace example
 
 ```bash
-mkdir -p /path/to/workspace/.ai-orchestrator
+npm run dev -- init-workspace --repo /path/to/workspace --repos "frontend=./frontend,backend=./backend"
 $EDITOR /path/to/workspace/.ai-orchestrator/spec.md
 $EDITOR /path/to/workspace/.ai-orchestrator/repos.json
 npm run dev -- doctor --repo /path/to/workspace

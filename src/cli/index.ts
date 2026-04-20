@@ -12,6 +12,7 @@ import { orchestratorPaths } from '../state/paths.js';
 import { runOrchestration } from '../core/orchestrator.js';
 import { runAudit, generateReport } from '../reporting/index.js';
 import { startViewer } from '../viewer/index.js';
+import { initWorkspaceScaffold, parseRepoEntries } from '../workspace/init.js';
 
 const program = new Command();
 
@@ -24,6 +25,39 @@ program
 program.command('init').description('Initialize local config and templates').action(() => {
   console.log('init: not yet implemented');
 });
+
+program
+  .command('init-workspace')
+  .description('Initialize a multi-repo workspace scaffold under .ai-orchestrator/')
+  .option('--repo <path>', 'Workspace root path (defaults to cwd)')
+  .requiredOption(
+    '--repos <items>',
+    'Comma-separated repo entries like frontend=./frontend,backend=./backend',
+  )
+  .option('--force', 'Overwrite existing repos.json and spec.md if present')
+  .action(async (opts: { repo?: string; repos: string; force?: boolean }) => {
+    const workspaceRoot = resolve(opts.repo ?? process.cwd());
+
+    console.log('\nOrchestrator Init Workspace\n' + '─'.repeat(40));
+    console.log(`  workspace: ${workspaceRoot}\n`);
+
+    try {
+      const repos = parseRepoEntries(opts.repos);
+      const result = await initWorkspaceScaffold(workspaceRoot, repos, opts.force === true);
+
+      console.log('Workspace scaffold created\n' + '─'.repeat(40));
+      console.log(`  Manifest: ${result.reposPath}`);
+      console.log(`  Spec:     ${result.specPath}`);
+      console.log(`  Repos:    ${result.repos.map((r) => `${r.id}=${r.path}`).join(', ')}`);
+      console.log('\nNext steps:');
+      console.log(`  1. Edit ${result.specPath}`);
+      console.log(`  2. Run: npm run dev -- doctor --repo ${result.workspaceRoot}`);
+      console.log(`  3. Run: npm run dev -- plan --repo ${result.workspaceRoot} --spec ${result.specPath}\n`);
+    } catch (err) {
+      console.error(`\ninit-workspace failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
+  });
 
 program
   .command('doctor')
