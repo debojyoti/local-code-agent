@@ -218,4 +218,32 @@ describe('runTask repo-awareness', () => {
     await expect(runTask(root, 'TASK-001')).rejects.toThrow(/ghost/);
     expect(mockCreateWorktree).not.toHaveBeenCalled();
   });
+
+  test('workspace mode falls back to task test_commands when config.json is missing', async () => {
+    const root = join(tmp, 'ws-no-config');
+    const repoAPath = join(root, 'repoA');
+    await seedState(
+      root,
+      makeTask({ id: 'TASK-001', repo_id: 'repoA' }),
+      { repos: [{ id: 'repoA', path: repoAPath }] },
+    );
+
+    // Remove config written by seedState to exercise workspace fallback behavior.
+    const { rm: rmFile } = await import('fs/promises');
+    await rmFile(orchestratorPaths.config(root), { force: true });
+
+    mockCreateWorktree.mockResolvedValue({
+      taskId: 'TASK-001',
+      worktreePath: '/fake/wt/TASK-001',
+      baseSha: 'abc',
+    });
+
+    await runTask(root, 'TASK-001');
+
+    // claude + fallback test command
+    expect(mockRunCommand).toHaveBeenCalledTimes(2);
+    expect(mockRunCommand.mock.calls[1][0]).toBe('sh');
+    expect(mockRunCommand.mock.calls[1][1]).toEqual(['-c', 'npm test']);
+    expect(mockRunCommand.mock.calls[1][2]?.cwd).toBe('/fake/wt/TASK-001');
+  });
 });

@@ -1,7 +1,8 @@
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { rm, writeFile, mkdir } from 'fs/promises';
+import { rm, writeFile, mkdir, readFile } from 'fs/promises';
 import { runCommand } from '../src/core/runner.js';
+import { orchestratorPaths } from '../src/state/paths.js';
 import {
   taskWorktreePath,
   createWorktree,
@@ -48,16 +49,17 @@ describe('worktree lifecycle', () => {
   let baseSha: string;
   let wtPath: string;
 
-  test('createWorktree creates a detached worktree without a task branch', async () => {
+  test('createWorktree uses the repo checkout directly', async () => {
     const info = await createWorktree(repoRoot, taskId);
     baseSha = info.baseSha;
     wtPath = info.worktreePath;
 
     expect(info.taskId).toBe(taskId);
     expect(info.baseSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(info.worktreePath).toBe(repoRoot);
 
     const branchResult = await runCommand('git', ['-C', wtPath, 'branch', '--show-current']);
-    expect(branchResult.stdout.trim()).toBe('');
+    expect(branchResult.stdout.trim()).not.toBe('');
   });
 
   test('createWorktree is idempotent on resume', async () => {
@@ -100,13 +102,12 @@ describe('worktree lifecycle', () => {
     expect(diff).toContain('new-file.ts');
   });
 
-  test('removeWorktree deletes worktree', async () => {
+  test('removeWorktree deletes the metadata file', async () => {
     await removeWorktree(repoRoot, taskId);
-
-    const worktreeList = await runCommand('git', [
-      '-C', repoRoot, 'worktree', 'list',
-    ]);
-    expect(worktreeList.stdout).not.toContain(taskId);
+    await expect(readFile(
+      join(orchestratorPaths.worktrees(repoRoot), `${taskId}.json`),
+      'utf8',
+    )).rejects.toThrow();
   });
 
   test('removeWorktree is safe to call when already removed', async () => {
@@ -122,16 +123,6 @@ describe('stale metadata', () => {
   afterEach(async () => {
     // best-effort cleanup so other tests aren't affected
     await removeWorktree(repoRoot, taskId).catch(() => {});
-  });
-
-  test('createWorktree throws when worktree directory is gone but metadata remains', async () => {
-    const info = await createWorktree(repoRoot, taskId);
-
-    // Simulate external removal of just the worktree directory.
-    await runCommand('git', ['-C', repoRoot, 'worktree', 'remove', '--force', info.worktreePath]);
-    await runCommand('git', ['-C', repoRoot, 'worktree', 'prune']);
-
-    await expect(createWorktree(repoRoot, taskId)).rejects.toThrow(/[Ss]tale/);
   });
 
   test('createWorktree rejects reuse when the stored repo does not match the intended repo', async () => {

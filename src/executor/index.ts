@@ -47,10 +47,10 @@ export async function runTask(repoRoot: string, taskId: string, opts?: RunTaskOp
     console.log(`  Target repo: [${task.repo_id}] ${targetRepoPath}`);
   }
 
-  // 3. Create or reuse worktree (stored under resolvedRepo; tracks targetRepoPath)
-  console.log(`  Creating worktree for ${taskId}...`);
+  // 3. Prepare the task working tree (the task runs directly in the target repo checkout).
+  console.log(`  Preparing repo context for ${taskId}...`);
   const worktree = await createWorktree(resolvedRepo, taskId, targetRepoPath);
-  console.log(`  Worktree: ${worktree.worktreePath}`);
+  console.log(`  Working path: ${worktree.worktreePath}`);
 
   // 4. Load config for check commands (best-effort — missing config is handled in runChecks)
   const config = await readJson(orchestratorPaths.config(resolvedRepo), ConfigSchema);
@@ -69,9 +69,19 @@ export async function runTask(repoRoot: string, taskId: string, opts?: RunTaskOp
 
     // 5. Invoke Claude Code CLI in the worktree
     console.log(`  Running Claude Code CLI...`);
-    const claudeResult = await runCommand('claude', ['--print', brief], {
+    const claudeResult = await runCommand(
+      'claude',
+      [
+        '--print',
+        '--permission-mode',
+        'bypassPermissions',
+        '--add-dir',
+        worktree.worktreePath,
+      ],
+      {
       cwd: worktree.worktreePath,
       timeoutMs: 300_000,
+      input: brief,
     });
 
     // 6. Save Claude's raw output
@@ -94,7 +104,14 @@ export async function runTask(repoRoot: string, taskId: string, opts?: RunTaskOp
 
     // 8. Run mandatory local checks
     console.log(`  Running checks...`);
-    const checks = await runChecks(resolvedRepo, taskId, worktree.worktreePath, config);
+    const checks = await runChecks(
+      resolvedRepo,
+      taskId,
+      worktree.worktreePath,
+      config,
+      task,
+      targetRepoPath,
+    );
     const completedAt = new Date().toISOString();
     const checksOk = checks.every((c) => c.ok);
 

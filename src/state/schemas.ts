@@ -52,6 +52,11 @@ export const ConfigSchema = z.object({
   lint_command: z.string().default(''),
   test_command: z.string().default(''),
   typecheck_command: z.string().default(''),
+  repo_commands: z.record(z.string(), z.object({
+    lint_command: z.string().default(''),
+    test_command: z.string().default(''),
+    typecheck_command: z.string().default(''),
+  })).default({}),
   max_retries: z.number().int().min(0).default(3),
   dry_run: z.boolean().default(false),
   stop_on_blocked: z.boolean().default(true),

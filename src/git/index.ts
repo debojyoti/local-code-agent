@@ -35,12 +35,11 @@ function worktreeMetaPath(workspaceRoot: string, taskId: string): string {
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 /**
- * Create (or resume) a detached worktree for a task.
+ * Create (or resume) the working context for a task.
  *
- * `workspaceRoot` is where `.ai-orchestrator/` lives — artifacts, metadata, and
- * the worktree directory are all rooted here. `gitRepoPath` is the git repo the
- * worktree actually tracks; in single-repo mode it is the same as `workspaceRoot`,
- * in workspace mode it is the child repo resolved from the task's `repo_id`.
+ * We keep all orchestrator metadata under `workspaceRoot`, but tasks run
+ * directly in the target repo checkout so later tasks can see earlier changes
+ * on the same branch.
  */
 export async function createWorktree(
   workspaceRoot: string,
@@ -48,34 +47,41 @@ export async function createWorktree(
   gitRepoPath?: string,
 ): Promise<WorktreeInfo> {
   const repoPath = gitRepoPath ?? workspaceRoot;
-  const wtPath = taskWorktreePath(workspaceRoot, taskId);
   const metaPath = worktreeMetaPath(workspaceRoot, taskId);
 
-  // Resume: metadata already exists — verify the recorded worktree still exists
-  // AND still tracks the same git repo the caller now intends.
+  // Resume: metadata already exists — verify the recorded repo still matches.
   const existing = await readJson(metaPath, WorktreeInfoSchema);
   if (existing) {
     // Reject reuse if the task now targets a different repo than the one the
-    // worktree was originally created from. Older metadata may lack this field;
+    // context was originally created from. Older metadata may lack this field;
     // in that case we skip the check for backwards compatibility.
     if (existing.gitRepoPath && existing.gitRepoPath !== repoPath) {
       throw new Error(
         `Stale worktree metadata for ${taskId}: ` +
           `worktree tracks '${existing.gitRepoPath}' but task now targets '${repoPath}'. ` +
-          `Remove ${metaPath} (and the worktree at ${existing.worktreePath}) and re-run.`,
+          `Remove ${metaPath} and re-run.`,
       );
     }
 
-    const wtCheck = await runCommand('git', ['-C', existing.worktreePath, 'rev-parse', '--git-dir']);
-    const worktreeExists = wtCheck.ok;
-    if (!worktreeExists) {
+    const repoCheck = await runCommand('git', ['-C', repoPath, 'rev-parse', '--git-dir']);
+    if (!repoCheck.ok) {
       throw new Error(
         `Stale worktree metadata for ${taskId}: ` +
-          `worktree missing. ` +
-          `Remove ${metaPath} and re-run to recreate the worktree.`,
+          `repo missing or not a git repository at '${repoPath}'. ` +
+          `Remove ${metaPath} and re-run.`,
       );
     }
-    return existing;
+
+    const refreshed: WorktreeInfo = {
+      taskId: existing.taskId,
+      worktreePath: repoPath,
+      baseSha: existing.baseSha,
+      gitRepoPath: repoPath,
+    };
+    if (existing.worktreePath !== repoPath || existing.gitRepoPath !== repoPath) {
+      await writeJson(metaPath, refreshed);
+    }
+    return refreshed;
   }
 
   // Capture the base commit so diffs are always relative to task start
@@ -87,15 +93,7 @@ export async function createWorktree(
 
   await mkdir(orchestratorPaths.worktrees(workspaceRoot), { recursive: true });
 
-  // Attach a detached worktree at the current repo HEAD without creating a task branch.
-  const wtResult = await runCommand('git', [
-    '-C', repoPath, 'worktree', 'add', '--detach', wtPath, baseSha,
-  ]);
-  if (!wtResult.ok) {
-    throw new Error(`Failed to create worktree at ${wtPath}: ${wtResult.stderr}`);
-  }
-
-  const info: WorktreeInfo = { taskId, worktreePath: wtPath, baseSha, gitRepoPath: repoPath };
+  const info: WorktreeInfo = { taskId, worktreePath: repoPath, baseSha, gitRepoPath: repoPath };
   await writeJson(metaPath, info);
   return info;
 }
@@ -105,17 +103,6 @@ export async function removeWorktree(
   taskId: string,
   gitRepoPath?: string,
 ): Promise<void> {
-  const repoPath = gitRepoPath ?? workspaceRoot;
-  const wtPath = taskWorktreePath(workspaceRoot, taskId);
-
-  const removeResult = await runCommand('git', [
-    '-C', repoPath, 'worktree', 'remove', '--force', wtPath,
-  ]);
-  if (!removeResult.ok) {
-    // Worktree may already be gone; prune to keep git's internal list consistent
-    await runCommand('git', ['-C', repoPath, 'worktree', 'prune']);
-  }
-
   const metaPath = worktreeMetaPath(workspaceRoot, taskId);
   try {
     await unlink(metaPath);
@@ -150,7 +137,7 @@ export async function getChangedFiles(
     .join('\n')
     .split('\n')
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter((l) => Boolean(l) && !l.startsWith('.ai-orchestrator/'));
 
   return [...new Set(lines)];
 }

@@ -45,10 +45,10 @@ describe('buildImplementationBrief', () => {
     expect(brief).toContain('Add authentication');
   });
 
-  test('includes worktree path and detached worktree mode', () => {
+  test('includes worktree path and same checkout mode', () => {
     const brief = buildImplementationBrief(makeTask(), worktree);
     expect(brief).toContain(worktree.worktreePath);
-    expect(brief).toContain('detached worktree');
+    expect(brief).toContain('same branch / same checkout');
   });
 
   test('includes acceptance criteria', () => {

@@ -3,6 +3,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { runCommand, type RunResult } from './runner.js';
 
+const DEFAULT_CODEX_MODEL = process.env.CODEX_MODEL?.trim() || 'gpt-5.4-mini';
+
 export async function runCodexPrompt(
   prompt: string,
   opts: { cwd: string; timeoutMs?: number },
@@ -13,7 +15,7 @@ export async function runCodexPrompt(
   try {
     const result = await runCommand(
       'codex',
-      ['exec', '--skip-git-repo-check', '-o', outputPath, prompt],
+      ['exec', '--skip-git-repo-check', '--model', DEFAULT_CODEX_MODEL, '-o', outputPath, prompt],
       {
         cwd: opts.cwd,
         timeoutMs: opts.timeoutMs,
