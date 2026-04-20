@@ -4,13 +4,15 @@ import { loadTask, updateTask } from '../state/tasks.js';
 import { saveArtifact, appendLog } from '../artifacts/index.js';
 import { createWorktree, getChangedFiles, getDiff } from '../git/index.js';
 import {
+  ConfigSchema,
   type Task,
   type ExecutionResult,
 } from '../state/schemas.js';
-import { writeJson } from '../state/persist.js';
+import { readJson, writeJson } from '../state/persist.js';
 import { orchestratorPaths } from '../state/paths.js';
 import { join } from 'path';
 import { buildImplementationBrief } from './brief.js';
+import { runChecks } from './checks.js';
 
 export interface RunTaskResult {
   task: Task;
@@ -35,7 +37,10 @@ export async function runTask(repoRoot: string, taskId: string): Promise<RunTask
   const worktree = await createWorktree(resolvedRepo, taskId);
   console.log(`  Worktree: ${worktree.worktreePath}`);
 
-  // 3. Mark task as running
+  // 3. Load config for check commands (best-effort — missing config is handled in runChecks)
+  const config = await readJson(orchestratorPaths.config(resolvedRepo), ConfigSchema);
+
+  // 4. Mark task as running
   const startedAt = new Date().toISOString();
   const runningTask: Task = { ...task, status: 'running', updated_at: startedAt };
   await updateTask(resolvedRepo, runningTask);
@@ -53,8 +58,6 @@ export async function runTask(repoRoot: string, taskId: string): Promise<RunTask
       cwd: worktree.worktreePath,
       timeoutMs: 300_000,
     });
-
-    const completedAt = new Date().toISOString();
 
     // 6. Save Claude's raw output
     const claudeOutput = [
@@ -74,7 +77,13 @@ export async function runTask(repoRoot: string, taskId: string): Promise<RunTask
       getDiff(worktree.worktreePath, worktree.baseSha),
     ]);
 
-    // 8. Build and persist execution result
+    // 8. Run mandatory local checks
+    console.log(`  Running checks...`);
+    const checks = await runChecks(resolvedRepo, taskId, worktree.worktreePath, config);
+    const completedAt = new Date().toISOString();
+    const checksOk = checks.every((c) => c.ok);
+
+    // 9. Build and persist execution result
     const attempt = task.retry_count + 1;
     const executionResult: ExecutionResult = {
       task_id: taskId,
@@ -82,10 +91,10 @@ export async function runTask(repoRoot: string, taskId: string): Promise<RunTask
       stdout: claudeResult.stdout,
       stderr: claudeResult.stderr,
       exit_code: claudeResult.exitCode,
-      ok: claudeResult.ok,
+      ok: claudeResult.ok && checksOk,
       changed_files: changedFiles,
       diff,
-      checks: [], // populated in Step 8
+      checks,
       started_at: startedAt,
       completed_at: completedAt,
     };
@@ -99,7 +108,7 @@ export async function runTask(repoRoot: string, taskId: string): Promise<RunTask
     console.log(`  Execution result saved: ${executionResultPath}`);
 
     // 9. Update task state
-    const nextStatus = claudeResult.ok ? 'reviewing' : 'failed';
+    const nextStatus = (claudeResult.ok && checksOk) ? 'reviewing' : 'failed';
     const doneTask: Task = {
       ...runningTask,
       status: nextStatus,
@@ -108,9 +117,10 @@ export async function runTask(repoRoot: string, taskId: string): Promise<RunTask
     };
     await updateTask(resolvedRepo, doneTask);
 
+    const failedChecks = checks.filter((c) => !c.ok).map((c) => c.name).join(', ') || 'none';
     await appendLog(
       resolvedRepo, taskId,
-      `run-task: complete — status=${nextStatus} changed=${changedFiles.length} files exit=${claudeResult.exitCode}`,
+      `run-task: complete — status=${nextStatus} changed=${changedFiles.length} files exit=${claudeResult.exitCode} checks=${checks.length} failed=${failedChecks}`,
     );
 
     return { task: doneTask, executionResult, briefPath, claudeOutputPath, executionResultPath };
