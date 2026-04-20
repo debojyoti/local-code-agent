@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { resolve } from 'path';
 import { runDoctor } from '../core/doctor.js';
 import { runPlan } from '../planner/index.js';
+import { runTask } from '../executor/index.js';
 import { orchestratorPaths } from '../state/paths.js';
 
 const program = new Command();
@@ -80,10 +81,41 @@ program
 program
   .command('run-task')
   .description('Run a single task by ID')
-  .option('--repo <path>', 'Path to target repository')
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
   .option('--task <id>', 'Task ID to run')
-  .action(() => {
-    console.log('run-task: not yet implemented');
+  .action(async (opts: { repo?: string; task?: string }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+    const taskId = opts.task;
+
+    if (!taskId) {
+      console.error('run-task: --task <id> is required');
+      process.exit(1);
+    }
+
+    console.log(`\nOrchestrator Run Task\n` + '─'.repeat(40));
+    console.log(`  repo: ${repoRoot}`);
+    console.log(`  task: ${taskId}\n`);
+
+    try {
+      const result = await runTask(repoRoot, taskId);
+      const r = result.executionResult;
+
+      console.log(`\nRun Task complete\n` + '─'.repeat(40));
+      console.log(`  Status:          ${result.task.status}`);
+      console.log(`  Attempt:         ${r.attempt}`);
+      console.log(`  Exit code:       ${r.exit_code}`);
+      console.log(`  Changed files:   ${r.changed_files.length}`);
+      if (r.changed_files.length > 0) {
+        for (const f of r.changed_files) console.log(`    ${f}`);
+      }
+      console.log(`  Brief:           ${result.briefPath}`);
+      console.log(`  Claude output:   ${result.claudeOutputPath}`);
+      console.log(`  Execution result:${result.executionResultPath}`);
+      console.log('');
+    } catch (err) {
+      console.error(`\nrun-task failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
   });
 
 program

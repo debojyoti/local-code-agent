@@ -5,11 +5,13 @@ import { z } from 'zod';
 /**
  * Read and validate a JSON file. Returns null if the file does not exist.
  * Throws on parse errors or schema validation failures.
+ * Using ZodTypeAny + z.output<S> ensures callers get the OUTPUT type
+ * (with defaults applied) rather than the input type.
  */
-export async function readJson<T>(
+export async function readJson<S extends z.ZodTypeAny>(
   filePath: string,
-  schema: z.ZodSchema<T>,
-): Promise<T | null> {
+  schema: S,
+): Promise<z.output<S> | null> {
   let raw: string;
   try {
     raw = await readFile(filePath, 'utf8');
@@ -18,7 +20,7 @@ export async function readJson<T>(
     throw err;
   }
   const parsed = JSON.parse(raw) as unknown;
-  return schema.parse(parsed);
+  return schema.parse(parsed) as z.output<S>;
 }
 
 /**

@@ -10,6 +10,8 @@ export interface RunResult {
 export interface RunOptions {
   cwd?: string;
   timeoutMs?: number;
+  /** Content to write to the process's stdin. */
+  input?: string;
 }
 
 export async function runCommand(
@@ -23,6 +25,7 @@ export async function runCommand(
       timeout: options.timeoutMs ?? 30_000,
       reject: false,
       all: false,
+      input: options.input,
     });
 
     return {
