@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { runDoctor } from '../core/doctor.js';
 
 const program = new Command();
 
@@ -13,9 +14,14 @@ program.command('init').description('Initialize local config and templates').act
   console.log('init: not yet implemented');
 });
 
-program.command('doctor').description('Verify required CLI tools and environment').action(() => {
-  console.log('doctor: not yet implemented');
-});
+program
+  .command('doctor')
+  .description('Verify required CLI tools and environment')
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
+  .action(async (opts: { repo?: string }) => {
+    const ok = await runDoctor(opts.repo);
+    if (!ok) process.exit(1);
+  });
 
 program
   .command('plan')
