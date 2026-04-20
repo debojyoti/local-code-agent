@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { resolve } from 'path';
 import { runDoctor } from '../core/doctor.js';
+import { runPlan } from '../planner/index.js';
+import { orchestratorPaths } from '../state/paths.js';
 
 const program = new Command();
 
@@ -26,10 +29,44 @@ program
 program
   .command('plan')
   .description('Analyze repo and generate ordered task plan using Codex CLI')
-  .option('--repo <path>', 'Path to target repository')
-  .option('--spec <path>', 'Path to spec file')
-  .action(() => {
-    console.log('plan: not yet implemented');
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
+  .option('--spec <path>', 'Path to spec file (defaults to .ai-orchestrator/spec.md)')
+  .action(async (opts: { repo?: string; spec?: string }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+    const specPath = opts.spec ?? orchestratorPaths.spec(repoRoot);
+
+    console.log('\nOrchestrator Plan\n' + '─'.repeat(40));
+    console.log(`  repo: ${repoRoot}`);
+    console.log(`  spec: ${specPath}\n`);
+
+    try {
+      const result = await runPlan(repoRoot, specPath);
+
+      console.log('\nPlan complete\n' + '─'.repeat(40));
+      console.log(`  Tasks saved: ${result.tasksPath}`);
+      console.log(`  Prompt:      ${result.promptArtifactPath}`);
+      console.log(`  Raw output:  ${result.rawOutputArtifactPath}`);
+
+      console.log(`\nRepo summary: ${result.planningOutput.repo_summary}\n`);
+
+      console.log(`Tasks (${result.tasks.length}):`);
+      for (const task of result.tasks) {
+        const deps = task.dependencies.length > 0 ? ` [deps: ${task.dependencies.join(', ')}]` : '';
+        console.log(`  ${task.id}  ${task.title}${deps}`);
+      }
+
+      if (result.planningOutput.risks.length > 0) {
+        console.log(`\nRisks:`);
+        for (const risk of result.planningOutput.risks) {
+          console.log(`  - ${risk}`);
+        }
+      }
+
+      console.log('');
+    } catch (err) {
+      console.error(`\nplan failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
   });
 
 program
