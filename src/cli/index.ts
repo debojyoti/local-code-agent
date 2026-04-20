@@ -8,6 +8,7 @@ import { runReview } from '../review/index.js';
 import { runTaskLoop } from '../executor/loop.js';
 import { orchestratorPaths } from '../state/paths.js';
 import { runOrchestration } from '../core/orchestrator.js';
+import { runAudit, generateReport } from '../reporting/index.js';
 
 const program = new Command();
 
@@ -246,9 +247,32 @@ program
 program
   .command('audit')
   .description('Run final repo-wide verification with Codex CLI')
-  .option('--repo <path>', 'Path to target repository')
-  .action(() => {
-    console.log('audit: not yet implemented');
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
+  .action(async (opts: { repo?: string }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+
+    console.log('\nOrchestrator Audit\n' + '─'.repeat(40));
+    console.log(`  repo: ${repoRoot}\n`);
+
+    try {
+      const audit = await runAudit(repoRoot);
+
+      console.log('\nAudit complete\n' + '─'.repeat(40));
+      console.log(`  Overall:  ${audit.overall}`);
+      console.log(`  Summary:  ${audit.summary}`);
+      if (audit.concerns.length > 0) {
+        console.log('\nConcerns:');
+        for (const c of audit.concerns) console.log(`  - ${c}`);
+      }
+      console.log(`\n  Prompt:     ${audit.promptPath}`);
+      console.log(`  Raw output: ${audit.rawOutputPath}`);
+      console.log('');
+
+      if (audit.overall === 'FAIL') process.exit(1);
+    } catch (err) {
+      console.error(`\naudit failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
   });
 
 program
@@ -284,9 +308,42 @@ program
 program
   .command('report')
   .description('Generate markdown report with task history and final status')
-  .option('--repo <path>', 'Path to target repository')
-  .action(() => {
-    console.log('report: not yet implemented');
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
+  .option('--audit', 'Run Codex audit before generating the report')
+  .action(async (opts: { repo?: string; audit?: boolean }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+
+    console.log('\nOrchestrator Report\n' + '─'.repeat(40));
+    console.log(`  repo: ${repoRoot}\n`);
+
+    try {
+      let auditSummary = '';
+
+      if (opts.audit) {
+        console.log('Running audit first...\n');
+        const audit = await runAudit(repoRoot);
+        auditSummary = `**Overall: ${audit.overall}**\n\n${audit.summary}`;
+        if (audit.concerns.length > 0) {
+          auditSummary += '\n\n**Concerns:**\n' + audit.concerns.map((c) => `- ${c}`).join('\n');
+        }
+        console.log(`\n  Audit: ${audit.overall} — ${audit.summary}\n`);
+      }
+
+      const result = await generateReport(repoRoot, auditSummary);
+      const r = result.finalReport;
+
+      console.log('\nReport complete\n' + '─'.repeat(40));
+      console.log(`  Total:   ${r.total_tasks}`);
+      console.log(`  Passed:  ${r.passed}`);
+      console.log(`  Failed:  ${r.failed}`);
+      console.log(`  Blocked: ${r.blocked}`);
+      console.log(`\n  Markdown: ${result.reportPath}`);
+      console.log(`  JSON:     ${result.reportJsonPath}`);
+      console.log('');
+    } catch (err) {
+      console.error(`\nreport failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
   });
 
 program.parse(process.argv);
