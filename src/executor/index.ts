@@ -22,7 +22,11 @@ export interface RunTaskResult {
   executionResultPath: string;
 }
 
-export async function runTask(repoRoot: string, taskId: string): Promise<RunTaskResult> {
+export interface RunTaskOptions {
+  fixBrief?: string;
+}
+
+export async function runTask(repoRoot: string, taskId: string, opts?: RunTaskOptions): Promise<RunTaskResult> {
   const resolvedRepo = resolve(repoRoot);
   await appendLog(resolvedRepo, taskId, `run-task: starting`);
 
@@ -48,7 +52,7 @@ export async function runTask(repoRoot: string, taskId: string): Promise<RunTask
   // From here any unexpected throw must transition the task out of 'running'.
   try {
     // 4. Build and save the implementation brief
-    const brief = buildImplementationBrief(task, worktree);
+    const brief = buildImplementationBrief(task, worktree, opts?.fixBrief);
     const briefPath = await saveArtifact(resolvedRepo, 'prompts', taskId, 'implementation-brief.md', brief);
     console.log(`  Brief saved: ${briefPath}`);
 

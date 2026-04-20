@@ -1,10 +1,18 @@
 import type { Task } from '../state/schemas.js';
 import type { WorktreeInfo } from '../git/index.js';
 
-export function buildImplementationBrief(task: Task, worktree: WorktreeInfo): string {
+export function buildImplementationBrief(
+  task: Task,
+  worktree: WorktreeInfo,
+  fixBrief?: string,
+): string {
   const sections: string[] = [];
 
   sections.push(`# Implementation Brief: ${task.id} — ${task.title}`);
+
+  if (fixBrief) {
+    sections.push(`## Fix Required\nA previous implementation attempt was reviewed and requires changes.\nAddress all issues described below before writing any new code.\n\n${fixBrief}`);
+  }
 
   sections.push(`## Context
 You are implementing a single focused task in an isolated git worktree.

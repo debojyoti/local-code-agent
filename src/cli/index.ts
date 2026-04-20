@@ -5,6 +5,7 @@ import { runDoctor } from '../core/doctor.js';
 import { runPlan } from '../planner/index.js';
 import { runTask } from '../executor/index.js';
 import { runReview } from '../review/index.js';
+import { runTaskLoop } from '../executor/loop.js';
 import { orchestratorPaths } from '../state/paths.js';
 
 const program = new Command();
@@ -172,6 +173,49 @@ program
       console.log('');
     } catch (err) {
       console.error(`\nreview failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('execute')
+  .description('Run a single task through the full execute → review → revise loop')
+  .option('--repo <path>', 'Path to target repository (defaults to cwd)')
+  .option('--task <id>', 'Task ID to execute')
+  .action(async (opts: { repo?: string; task?: string }) => {
+    const repoRoot = resolve(opts.repo ?? process.cwd());
+    const taskId = opts.task;
+
+    if (!taskId) {
+      console.error('execute: --task <id> is required');
+      process.exit(1);
+    }
+
+    console.log(`\nOrchestrator Execute\n` + '─'.repeat(40));
+    console.log(`  repo: ${repoRoot}`);
+    console.log(`  task: ${taskId}\n`);
+
+    try {
+      const result = await runTaskLoop(repoRoot, taskId);
+
+      console.log(`\nExecute complete\n` + '─'.repeat(40));
+      console.log(`  Stop reason:  ${result.stoppedReason}`);
+      console.log(`  Final status: ${result.task.status}`);
+      console.log(`  Attempts:     ${result.attempts.length}`);
+
+      for (const a of result.attempts) {
+        const verdictStr = a.verdict ?? 'n/a';
+        const execStr = a.executionOk ? 'ok' : 'fail';
+        console.log(`    #${a.attemptNum}  exec=${execStr}  verdict=${verdictStr}`);
+      }
+
+      console.log('');
+
+      if (result.stoppedReason !== 'pass') {
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(`\nexecute failed: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
   });
