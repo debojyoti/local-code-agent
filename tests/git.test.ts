@@ -133,4 +133,15 @@ describe('stale metadata', () => {
 
     await expect(createWorktree(repoRoot, taskId)).rejects.toThrow(/[Ss]tale/);
   });
+
+  test('createWorktree rejects reuse when the stored repo does not match the intended repo', async () => {
+    // First call records gitRepoPath = repoRoot
+    await createWorktree(repoRoot, taskId);
+
+    // Second call with a different gitRepoPath should be rejected loudly,
+    // not silently reused. (Workspace-mode scenario: task's repo_id changed.)
+    await expect(
+      createWorktree(repoRoot, taskId, '/some/other/repo'),
+    ).rejects.toThrow(/[Ss]tale|different repo|now targets/);
+  });
 });

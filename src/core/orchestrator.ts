@@ -53,6 +53,12 @@ function allDepsPassed(task: Task, taskMap: Map<string, Task>): boolean {
   return task.dependencies.every((depId) => taskMap.get(depId)?.status === 'passed');
 }
 
+/** Prefix the task id/title with `[repo_id]` when the task targets a specific repo. */
+function taskLabel(task: Task): string {
+  const repoTag = task.repo_id ? `[${task.repo_id}] ` : '';
+  return `${repoTag}${task.id}  ${task.title}`;
+}
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -99,7 +105,7 @@ export async function runOrchestration(repoRoot: string, resume: boolean): Promi
   if (resume) {
     for (const task of taskList.tasks) {
       if (task.status === 'running' || task.status === 'reviewing') {
-        console.log(`  Resetting stuck task ${task.id} (was '${task.status}') → pending`);
+        console.log(`  Resetting stuck task ${taskLabel(task)} (was '${task.status}') → pending`);
         await appendLog(resolvedRepo, task.id, `orchestrator: reset '${task.status}' → pending on resume`);
         await updateTask(resolvedRepo, { ...task, status: 'pending', updated_at: now() });
       }
@@ -129,26 +135,26 @@ export async function runOrchestration(repoRoot: string, resume: boolean): Promi
     const current = taskMap.get(task.id)!;
 
     if (current.status === 'passed') {
-      console.log(`\n  [skip]  ${current.id}  ${current.title}  (already passed)`);
+      console.log(`\n  [skip]  ${taskLabel(current)}  (already passed)`);
       continue;
     }
 
     if (current.status === 'blocked' || current.status === 'failed') {
-      console.log(`\n  [skip]  ${current.id}  ${current.title}  (${current.status})`);
+      console.log(`\n  [skip]  ${taskLabel(current)}  (${current.status})`);
       skipped++;
       continue;
     }
 
     if (!allDepsPassed(current, taskMap)) {
       const unmet = current.dependencies.filter((d) => taskMap.get(d)?.status !== 'passed');
-      console.log(`\n  [skip]  ${current.id}  ${current.title}  (unmet deps: ${unmet.join(', ')})`);
+      console.log(`\n  [skip]  ${taskLabel(current)}  (unmet deps: ${unmet.join(', ')})`);
       await appendLog(resolvedRepo, current.id, `orchestrator: skipping — unmet deps: ${unmet.join(', ')}`);
       skipped++;
       continue;
     }
 
     console.log(`\n${SEP}`);
-    console.log(`  Task ${current.id}  —  ${current.title}`);
+    console.log(`  Task ${taskLabel(current)}`);
     console.log(SEP);
 
     state = { ...state, current_task_id: current.id, updated_at: now() };
@@ -182,7 +188,7 @@ export async function runOrchestration(repoRoot: string, resume: boolean): Promi
       state = { ...state, updated_at: now() };
       await saveState(resolvedRepo, state);
       if (stopOnBlocked) {
-        console.log(`\n  Stopping: task ${current.id} is BLOCKED (stop_on_blocked=true)`);
+        console.log(`\n  Stopping: task ${taskLabel(current)} is BLOCKED (stop_on_blocked=true)`);
         await appendLog(resolvedRepo, null, `orchestrator: stopping on blocked task ${current.id}`);
         break;
       }
@@ -190,7 +196,7 @@ export async function runOrchestration(repoRoot: string, resume: boolean): Promi
       failed++;
       state = { ...state, updated_at: now() };
       await saveState(resolvedRepo, state);
-      console.log(`\n  Stopping: task ${current.id} failed (reason: ${result.stoppedReason})`);
+      console.log(`\n  Stopping: task ${taskLabel(current)} failed (reason: ${result.stoppedReason})`);
       await appendLog(resolvedRepo, null, `orchestrator: stopping on failed task ${current.id}`);
       break;
     }
