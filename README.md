@@ -2,6 +2,19 @@
 
 Terminal-first TypeScript orchestrator for planning work with Codex CLI, implementing tasks with Claude Code CLI, and persisting state under `.ai-orchestrator/`.
 
+## Index
+
+- [What It Does](#what-it-does)
+- [Quick Start](#quick-start)
+- [Full Workflow Example](#full-workflow-example)
+- [Resume a Project](#resume-a-project)
+- [Multi-Repo Workspace](#multi-repo-workspace)
+- [What You See in the Terminal](#what-you-see-in-the-terminal)
+- [Detailed Command Usage](#detailed-command-usage)
+- [Common Usage Patterns](#common-usage-patterns)
+- [Useful Commands](#useful-commands)
+- [State Layout](#state-layout)
+
 ## What It Does
 
 This tool runs a grounded local workflow:
