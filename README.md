@@ -269,6 +269,204 @@ If the run stops:
 npm run dev -- resume --repo /path/to/project
 ```
 
+## Multi-Repo Workspace
+
+Everything above assumes a single git repository. The orchestrator also supports a **workspace root** that sits above several git repos — one `.ai-orchestrator/` directory at the workspace root coordinates tasks across those repos.
+
+Single-repo usage is unchanged. Workspace mode is additive.
+
+### When to point `--repo` at a workspace root vs a single repo
+
+- Single repo: pass `--repo /path/to/repo` — the same path that contains your git checkout. This is the normal mode.
+- Workspace: pass `--repo /path/to/workspace` — the directory that contains `.ai-orchestrator/` and **multiple** child git repos. The workspace root itself does not need to be a git repo.
+
+The CLI auto-detects workspace mode by looking for `.ai-orchestrator/repos.json` under the `--repo` path. If present, the orchestrator treats that path as a workspace root.
+
+### Workspace layout
+
+```text
+/path/to/workspace/
+  .ai-orchestrator/
+    spec.md
+    repos.json          # declares child repos
+    tasks.json          # one shared, ordered task list spanning all repos
+    config.json
+    state.json
+    prompts/
+    artifacts/
+    reviews/
+    reports/
+    worktrees/          # per-task worktrees, still rooted at the workspace
+  frontend/             # child git repo
+    .git/
+    ...
+  backend/              # child git repo
+    .git/
+    ...
+```
+
+All state and artifacts stay under the workspace root. Per-task worktrees live under `workspace/.ai-orchestrator/worktrees/<TASK-ID>/` but are created from the correct child repo based on the task's `repo_id`.
+
+### `.ai-orchestrator/repos.json`
+
+Declare each child repo with an `id`, a `path` (relative to the workspace root or absolute), and an optional `description`.
+
+```json
+{
+  "version": "1",
+  "repos": [
+    { "id": "frontend", "path": "./frontend", "description": "Next.js web app" },
+    { "id": "backend",  "path": "./backend",  "description": "Go API service" }
+  ]
+}
+```
+
+- `id` is the value tasks use to target a repo. Keep it short and stable.
+- `path` may be relative (resolved against the workspace root) or absolute.
+- Each declared path must be an actual git repository — `doctor` validates this.
+
+### Workspace `spec.md`
+
+Write the spec at the workspace level. Reference the child repos by their `id`s so Codex can split work across them.
+
+```md
+# Workspace Spec
+
+Goal: add end-to-end "delete account" flow across the web app and the API.
+
+Repositories:
+- frontend — Next.js web app
+- backend — Go API service
+
+Required behavior:
+- backend: new DELETE /v1/account endpoint, soft-delete the row, return 204
+- frontend: add a confirmation dialog on the account settings page; call the endpoint; surface errors inline
+- both: cover the new behavior with a small test
+
+Constraints:
+- keep the migration reversible
+- no new dependencies in frontend
+- do not change unrelated routes or pages
+
+Definition of done:
+- the endpoint, UI, and tests land in their respective repos
+- a manual click-through from settings deletes the test account and returns to the sign-in screen
+```
+
+Keep it practical and grounded. Do not dump architecture diagrams — the planner already inspects each repo's shape.
+
+### `doctor` in workspace mode
+
+```bash
+npm run dev -- doctor --repo /path/to/workspace
+```
+
+`doctor` detects the workspace, prints each declared repo, and reports per-repo issues (missing path, not a git repository, etc.) alongside the usual tool checks.
+
+### Planning a workspace
+
+```bash
+npm run dev -- plan --repo /path/to/workspace --spec /path/to/workspace/.ai-orchestrator/spec.md
+```
+
+What changes in workspace mode:
+- the planner inspects **each** declared repo (git log, top-level items, `package.json`, `README.md`) and includes a per-repo section in the planning prompt
+- Codex is instructed that every task must include a `repo_id` from the declared list
+- tasks.json ends up with one shared ordered list — each task carries a `repo_id` identifying its target repo
+
+If Codex omits a `repo_id` on any task, planning fails loudly and you can retry. If a task references an unknown `repo_id`, it fails the same way.
+
+### Refining a workspace plan
+
+```bash
+npm run dev -- plan-refine --repo /path/to/workspace --feedback "Move the migration into its own task under backend before the endpoint task."
+```
+
+`plan-refine` behaves the same as single-repo — it replays the workspace planning context plus your feedback. Preserved history still follows unchanged tasks.
+
+### Running and resuming a workspace
+
+Run from the workspace root:
+
+```bash
+npm run dev -- run --repo /path/to/workspace
+```
+
+What happens:
+- `tasks.json` remains the single ordering source — dependencies are honored across repos (a task in `backend` can depend on a task in `frontend`, or vice versa)
+- each task's worktree is created from the repo identified by its `repo_id`
+- Claude runs in the correct repo's worktree; local checks run there too
+- Codex reviews the task with the correct repo as its working directory
+- artifacts, logs, state, and reports stay centralized under the workspace root
+
+Terminal output includes `[repo_id]` next to the task id/title on skip lines, task headers, stop-on-blocked/failed lines, and the resume reset line — so you always know which repo a given task belongs to.
+
+Resume from the same workspace path:
+
+```bash
+npm run dev -- resume --repo /path/to/workspace
+```
+
+Resume still:
+- reads `state.json` from the workspace root
+- resets any task stuck in `running` or `reviewing` back to `pending` before continuing
+- continues dependency-aware execution across repos from the persisted state
+
+### Per-task commands in workspace mode
+
+`run-task`, `review`, and `execute` all accept the workspace root. They resolve the correct child repo from the task's `repo_id` automatically.
+
+```bash
+npm run dev -- run-task --repo /path/to/workspace --task TASK-002
+npm run dev -- review   --repo /path/to/workspace --task TASK-002
+npm run dev -- execute  --repo /path/to/workspace --task TASK-002
+```
+
+If a task has a `repo_id` that isn't declared in `repos.json`, the command fails before creating a worktree or invoking Codex.
+
+### `audit`, `report`, and `viewer` in workspace mode
+
+Audit and report both detect the workspace and add repo context without becoming noisy.
+
+```bash
+npm run dev -- audit  --repo /path/to/workspace
+npm run dev -- report --repo /path/to/workspace --audit
+```
+
+- the audit prompt gains a `## Workspace` block listing each declared repo and a `Repo` column in the Task Results table
+- the markdown report gains a `## Repositories` summary (task counts per repo) and tags each per-task section with `[repo_id]`; the root is labeled `Workspace root:` instead of `Repository:`
+- `final-report.json` → `task_summaries[i].repo_id` is populated for workspace tasks
+
+The viewer shows a `Repo` column in the task list whenever any task carries a `repo_id`, and the task detail page surfaces the `Repo:` line near the status:
+
+```bash
+npm run dev -- viewer --repo /path/to/workspace --port 7842
+```
+
+### Where `repo_id` shows up
+
+- `tasks.json` — every task in workspace mode has a `repo_id` field
+- terminal output — `run`, `resume`, `run-task`, `review`, and `execute` print `[repo_id]` next to the task id
+- `reports/report.md` — Repositories summary, per-task section headings and bullet, final report JSON `task_summaries[i].repo_id`
+- `reports/audit-prompt.md` — `## Workspace` section and Repo column in the task table
+- viewer — Repo column in the overview, `Repo: <id>` line on the task detail page
+
+### Full workspace example
+
+```bash
+mkdir -p /path/to/workspace/.ai-orchestrator
+$EDITOR /path/to/workspace/.ai-orchestrator/spec.md
+$EDITOR /path/to/workspace/.ai-orchestrator/repos.json
+npm run dev -- doctor --repo /path/to/workspace
+npm run dev -- plan   --repo /path/to/workspace --spec /path/to/workspace/.ai-orchestrator/spec.md
+cat /path/to/workspace/.ai-orchestrator/tasks.json
+npm run dev -- plan-refine --repo /path/to/workspace --feedback "Land the backend endpoint before the frontend dialog."
+npm run dev -- run    --repo /path/to/workspace
+# if execution stops:
+npm run dev -- resume --repo /path/to/workspace
+npm run dev -- report --repo /path/to/workspace --audit
+```
+
 ## What You See in the Terminal
 
 When you run `plan`, `plan-refine`, `run`, `execute`, `review`, `audit`, or `report`, the terminal shows concise progress:
@@ -431,13 +629,14 @@ npm run dev -- viewer --repo /path/to/project --port 7842
 
 ## State Layout
 
-The target repo stores orchestrator state here:
+The target repo (or workspace root) stores orchestrator state here:
 
 ```text
 .ai-orchestrator/
   config.json
   state.json
   tasks.json
+  repos.json          # workspace mode only
   prompts/
   artifacts/
   reviews/
@@ -447,7 +646,8 @@ The target repo stores orchestrator state here:
 
 Typical files you will inspect most often:
 - `spec.md`: your initial project prompt/spec
-- `tasks.json`: the current plan
+- `tasks.json`: the current plan (tasks carry a `repo_id` in workspace mode)
+- `repos.json`: declared child repos — present only in workspace mode
 - `config.json`: inferred or preserved lint/test/typecheck commands
 - `state.json`: current orchestration state
 
