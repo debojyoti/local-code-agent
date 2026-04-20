@@ -13,6 +13,7 @@ import { runOrchestration } from '../core/orchestrator.js';
 import { runAudit, generateReport } from '../reporting/index.js';
 import { startViewer } from '../viewer/index.js';
 import { initWorkspaceScaffold, parseRepoEntries } from '../workspace/init.js';
+import { promptForWorkspaceInit } from '../workspace/prompt.js';
 
 const program = new Command();
 
@@ -30,20 +31,30 @@ program
   .command('init-workspace')
   .description('Initialize a multi-repo workspace scaffold under .ai-orchestrator/')
   .option('--repo <path>', 'Workspace root path (defaults to cwd)')
-  .requiredOption(
-    '--repos <items>',
-    'Comma-separated repo entries like frontend=./frontend,backend=./backend',
-  )
+  .option('--repos <items>', 'Comma-separated repo entries like frontend=./frontend,backend=./backend')
+  .option('--interactive', 'Prompt for workspace root and repo entries interactively')
   .option('--force', 'Overwrite existing repos.json and spec.md if present')
-  .action(async (opts: { repo?: string; repos: string; force?: boolean }) => {
-    const workspaceRoot = resolve(opts.repo ?? process.cwd());
+  .action(async (opts: { repo?: string; repos?: string; interactive?: boolean; force?: boolean }) => {
+    const defaultWorkspaceRoot = resolve(opts.repo ?? process.cwd());
 
     console.log('\nOrchestrator Init Workspace\n' + '─'.repeat(40));
-    console.log(`  workspace: ${workspaceRoot}\n`);
+    console.log(`  workspace: ${defaultWorkspaceRoot}\n`);
 
     try {
-      const repos = parseRepoEntries(opts.repos);
-      const result = await initWorkspaceScaffold(workspaceRoot, repos, opts.force === true);
+      let workspaceRoot = defaultWorkspaceRoot;
+      let repos;
+      let force = opts.force === true;
+
+      if (opts.interactive || !opts.repos) {
+        const answers = await promptForWorkspaceInit(defaultWorkspaceRoot);
+        workspaceRoot = resolve(answers.workspaceRoot);
+        repos = answers.repos;
+        force = answers.force;
+      } else {
+        repos = parseRepoEntries(opts.repos);
+      }
+
+      const result = await initWorkspaceScaffold(workspaceRoot, repos, force);
 
       console.log('Workspace scaffold created\n' + '─'.repeat(40));
       console.log(`  Manifest: ${result.reposPath}`);

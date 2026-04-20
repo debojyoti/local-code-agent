@@ -12,6 +12,8 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Content to write to the process's stdin. */
   input?: string;
+  /** How stdin should be connected for the child process. */
+  stdin?: 'pipe' | 'ignore';
 }
 
 export async function runCommand(
@@ -26,6 +28,7 @@ export async function runCommand(
       reject: false,
       all: false,
       input: options.input,
+      stdin: options.stdin,
     });
 
     return {

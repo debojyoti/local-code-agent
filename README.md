@@ -303,6 +303,24 @@ The fastest way to bootstrap a multi-repo workspace is:
 npm run dev -- init-workspace --repo /path/to/workspace --repos "frontend=./frontend,backend=./backend,shared=./shared"
 ```
 
+You can also run it interactively:
+
+```bash
+npm run dev -- init-workspace
+```
+
+Or provide the workspace root and let the command prompt for repo entries:
+
+```bash
+npm run dev -- init-workspace --repo /path/to/workspace
+```
+
+Interactive mode prompts for:
+- workspace root
+- repo ids and paths, one by one
+- optional descriptions
+- whether to overwrite existing scaffold files
+
 This creates:
 - `.ai-orchestrator/repos.json`
 - `.ai-orchestrator/spec.md`

@@ -1,6 +1,6 @@
 import { readFile, readdir } from 'fs/promises';
 import { join, resolve } from 'path';
-import { runCommand } from '../core/runner.js';
+import { runCodexPrompt } from '../core/codex.js';
 import { orchestratorPaths } from '../state/paths.js';
 import { readJson, writeJson } from '../state/persist.js';
 import { ConfigSchema, TaskListSchema, type Task, type TaskList } from '../state/schemas.js';
@@ -59,7 +59,7 @@ export async function runPlanRefine(repoRoot: string, opts: RefineOptions): Prom
 
   // 5. Run Codex
   console.log('  Running Codex CLI...');
-  const codexResult = await runCommand('codex', ['--quiet', prompt], {
+  const codexResult = await runCodexPrompt(prompt, {
     cwd: resolvedRepo,
     timeoutMs: 180_000,
   });

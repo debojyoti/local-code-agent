@@ -22,8 +22,8 @@ import { orchestratorPaths } from '../src/state/paths.js';
 
 // ─── Module mock (declared before any import of review) ──────────────────────
 
-jest.unstable_mockModule('../src/core/runner.js', () => ({
-  runCommand: jest.fn(),
+jest.unstable_mockModule('../src/core/codex.js', () => ({
+  runCodexPrompt: jest.fn(),
 }));
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -104,20 +104,20 @@ async function seedState(
 
 describe('runReview repo-awareness', () => {
   let runReview: typeof import('../src/review/index.js').runReview;
-  let mockRunCommand: jest.Mock;
+  let mockRunCodexPrompt: jest.Mock;
 
   beforeAll(async () => {
     ({ runReview } = await import('../src/review/index.js'));
 
-    const runnerMod = await import('../src/core/runner.js');
-    mockRunCommand = runnerMod.runCommand as jest.Mock;
+    const codexMod = await import('../src/core/codex.js');
+    mockRunCodexPrompt = codexMod.runCodexPrompt as jest.Mock;
 
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockRunCommand.mockResolvedValue({
+    mockRunCodexPrompt.mockResolvedValue({
       stdout: '```json\n' + passReviewOutput + '\n```',
       stderr: '',
       exitCode: 0,
@@ -144,10 +144,10 @@ describe('runReview repo-awareness', () => {
     await runReview(root, 'TASK-001');
 
     // The only runCommand call in runReview is the Codex invocation.
-    expect(mockRunCommand).toHaveBeenCalledTimes(1);
-    const [cmd, args, opts] = mockRunCommand.mock.calls[0];
-    expect(cmd).toBe('codex');
-    expect(args[0]).toBe('--quiet');
+    expect(mockRunCodexPrompt).toHaveBeenCalledTimes(1);
+    const [prompt, opts] = mockRunCodexPrompt.mock.calls[0];
+    expect(typeof prompt).toBe('string');
+    expect(prompt).toContain('You are reviewing a code implementation task');
     expect(opts?.cwd).toBe(repoAPath);
   });
 
@@ -161,7 +161,7 @@ describe('runReview repo-awareness', () => {
 
     await runReview(root, 'TASK-001');
 
-    const [, , opts] = mockRunCommand.mock.calls[0];
+    const [, opts] = mockRunCodexPrompt.mock.calls[0];
     expect(opts?.cwd).toBe(join(root, 'services/svc'));
   });
 
@@ -173,7 +173,7 @@ describe('runReview repo-awareness', () => {
 
     await runReview(root, 'TASK-001');
 
-    const [, , opts] = mockRunCommand.mock.calls[0];
+    const [, opts] = mockRunCodexPrompt.mock.calls[0];
     expect(opts?.cwd).toBe(root);
   });
 
@@ -188,7 +188,7 @@ describe('runReview repo-awareness', () => {
     );
 
     await expect(runReview(root, 'TASK-001')).rejects.toThrow(/repo_id/);
-    expect(mockRunCommand).not.toHaveBeenCalled();
+    expect(mockRunCodexPrompt).not.toHaveBeenCalled();
   });
 
   test('workspace mode + unknown repo_id fails clearly without invoking Codex', async () => {
@@ -200,6 +200,6 @@ describe('runReview repo-awareness', () => {
     );
 
     await expect(runReview(root, 'TASK-001')).rejects.toThrow(/ghost/);
-    expect(mockRunCommand).not.toHaveBeenCalled();
+    expect(mockRunCodexPrompt).not.toHaveBeenCalled();
   });
 });

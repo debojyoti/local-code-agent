@@ -1,6 +1,6 @@
 import { resolve, join } from 'path';
 import { readdir, readFile } from 'fs/promises';
-import { runCommand } from '../core/runner.js';
+import { runCodexPrompt } from '../core/codex.js';
 import { loadTask, updateTask } from '../state/tasks.js';
 import { saveArtifact, appendLog } from '../artifacts/index.js';
 import { orchestratorPaths } from '../state/paths.js';
@@ -63,7 +63,7 @@ export async function runReview(repoRoot: string, taskId: string): Promise<Revie
   try {
     // 6. Invoke Codex CLI in the target repo (so Codex sees the right files)
     console.log('  Running Codex CLI...');
-    const codexResult = await runCommand('codex', ['--quiet', prompt], {
+    const codexResult = await runCodexPrompt(prompt, {
       cwd: targetRepoPath,
       timeoutMs: 180_000,
     });

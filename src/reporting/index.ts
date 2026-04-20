@@ -1,6 +1,6 @@
 import { resolve, join } from 'path';
 import { readdir } from 'fs/promises';
-import { runCommand } from '../core/runner.js';
+import { runCodexPrompt } from '../core/codex.js';
 import { orchestratorPaths } from '../state/paths.js';
 import { readJson, writeJson } from '../state/persist.js';
 import { TaskListSchema, ReviewResultSchema, FinalReportSchema, type Task, type ReviewResult, type FinalReport } from '../state/schemas.js';
@@ -50,7 +50,7 @@ export async function runAudit(repoRoot: string): Promise<AuditResult> {
   console.log(`  Audit prompt saved: ${promptPath}`);
 
   console.log('  Running Codex CLI for audit...');
-  const codexResult = await runCommand('codex', ['--quiet', prompt], {
+  const codexResult = await runCodexPrompt(prompt, {
     cwd: resolvedRepo,
     timeoutMs: 180_000,
   });

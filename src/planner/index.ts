@@ -1,6 +1,6 @@
 import { readFile } from 'fs/promises';
 import { resolve } from 'path';
-import { runCommand } from '../core/runner.js';
+import { runCodexPrompt } from '../core/codex.js';
 import { orchestratorPaths } from '../state/paths.js';
 import { readJson, writeJson } from '../state/persist.js';
 import { ConfigSchema, type Task, type TaskList } from '../state/schemas.js';
@@ -54,7 +54,7 @@ export async function runPlan(repoRoot: string, specPath: string): Promise<PlanR
 
   // 3. Run Codex
   console.log('  Running Codex CLI...');
-  const codexResult = await runCommand('codex', ['--quiet', prompt], {
+  const codexResult = await runCodexPrompt(prompt, {
     cwd: resolvedRepo,
     timeoutMs: 180_000,
   });
