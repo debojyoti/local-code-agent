@@ -5,9 +5,10 @@ import { orchestratorPaths } from '../state/paths.js';
 import { readJson, writeJson } from '../state/persist.js';
 import { ConfigSchema, type Task, type TaskList } from '../state/schemas.js';
 import { saveArtifact, appendLog } from '../artifacts/index.js';
-import { inspectRepo } from './inspect.js';
-import { buildPlanningPrompt } from './prompt.js';
-import { extractPlanningOutput, normalizeTasks, type PlanningOutput } from './extract.js';
+import { inspectRepo, inspectWorkspace } from './inspect.js';
+import { buildPlanningPrompt, buildWorkspacePlanningPrompt } from './prompt.js';
+import { extractPlanningOutput, normalizeTasks, validateWorkspaceTaskRepoIds, type PlanningOutput } from './extract.js';
+import { isWorkspaceRoot, readWorkspaceManifest } from '../workspace/index.js';
 
 export interface PlanResult {
   tasksPath: string;
@@ -31,16 +32,27 @@ export async function runPlan(repoRoot: string, specPath: string): Promise<PlanR
     throw new Error(`Cannot read spec file: ${resolvedSpec}`);
   }
 
-  // 2. Inspect repo
-  console.log('  Inspecting repository...');
-  const ctx = await inspectRepo(resolvedRepo);
+  // 2. Detect workspace vs single-repo and build prompt
+  const workspace = await isWorkspaceRoot(resolvedRepo);
+  let prompt: string;
+  let knownRepoIds: string[] | null = null;
 
-  // 3. Build prompt
-  const prompt = buildPlanningPrompt(spec, ctx);
+  if (workspace) {
+    console.log('  Workspace detected — inspecting all repos...');
+    const manifest = await readWorkspaceManifest(resolvedRepo);
+    knownRepoIds = manifest.repos.map((r) => r.id);
+    const wsCtx = await inspectWorkspace(resolvedRepo, manifest);
+    prompt = buildWorkspacePlanningPrompt(spec, wsCtx);
+  } else {
+    console.log('  Inspecting repository...');
+    const ctx = await inspectRepo(resolvedRepo);
+    prompt = buildPlanningPrompt(spec, ctx);
+  }
+
   const promptPath = await saveArtifact(resolvedRepo, 'prompts', null, 'planning-prompt.md', prompt);
   console.log(`  Prompt saved: ${promptPath}`);
 
-  // 4. Run Codex
+  // 3. Run Codex
   console.log('  Running Codex CLI...');
   const codexResult = await runCommand('codex', ['--quiet', prompt], {
     cwd: resolvedRepo,
@@ -61,11 +73,16 @@ export async function runPlan(repoRoot: string, specPath: string): Promise<PlanR
     );
   }
 
-  // 5. Extract and normalize
+  // 4. Extract and normalize
   const planningOutput = extractPlanningOutput(codexResult.stdout);
   const tasks = normalizeTasks(planningOutput);
 
-  // 6. Persist tasks.json
+  // 5. Validate repo_id on every task in workspace mode
+  if (knownRepoIds) {
+    validateWorkspaceTaskRepoIds(tasks, knownRepoIds);
+  }
+
+  // 6. Persist tasks.json under the workspace/repo root
   const now = new Date().toISOString();
   const taskList: TaskList = {
     version: '1',
@@ -76,19 +93,21 @@ export async function runPlan(repoRoot: string, specPath: string): Promise<PlanR
   const tasksPath = orchestratorPaths.tasks(resolvedRepo);
   await writeJson(tasksPath, taskList);
 
-  // 7. Persist inferred commands into config.json
-  const configPath = orchestratorPaths.config(resolvedRepo);
-  const existingConfig = await readJson(configPath, ConfigSchema) ?? ConfigSchema.parse({ repo_path: resolvedRepo });
-  const cmds = planningOutput.recommended_commands;
-  const updatedConfig = {
-    ...existingConfig,
-    repo_path: resolvedRepo,
-    spec_path: resolvedSpec,
-    lint_command: existingConfig.lint_command || cmds.lint || '',
-    test_command: existingConfig.test_command || cmds.test || '',
-    typecheck_command: existingConfig.typecheck_command || cmds.typecheck || '',
-  };
-  await writeJson(configPath, updatedConfig);
+  // 7. Persist inferred commands into config.json (single-repo only)
+  if (!workspace) {
+    const configPath = orchestratorPaths.config(resolvedRepo);
+    const existingConfig = await readJson(configPath, ConfigSchema) ?? ConfigSchema.parse({ repo_path: resolvedRepo });
+    const cmds = planningOutput.recommended_commands;
+    const updatedConfig = {
+      ...existingConfig,
+      repo_path: resolvedRepo,
+      spec_path: resolvedSpec,
+      lint_command: existingConfig.lint_command || cmds.lint || '',
+      test_command: existingConfig.test_command || cmds.test || '',
+      typecheck_command: existingConfig.typecheck_command || cmds.typecheck || '',
+    };
+    await writeJson(configPath, updatedConfig);
+  }
 
   await appendLog(resolvedRepo, null, `plan: complete — ${tasks.length} task(s) saved to ${tasksPath}`);
 

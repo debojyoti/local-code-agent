@@ -1,6 +1,8 @@
 import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
 import { runCommand } from '../core/runner.js';
+import type { WorkspaceManifest } from '../workspace/index.js';
+import { resolveRepoPath } from '../workspace/index.js';
 
 export interface RepoContext {
   repoPath: string;
@@ -8,6 +10,44 @@ export interface RepoContext {
   topLevelItems: string[];
   packageJson: string | null;
   readme: string | null;
+}
+
+export interface WorkspaceRepoContext extends RepoContext {
+  repoId: string;
+}
+
+export interface WorkspaceContext {
+  workspaceRoot: string;
+  repos: WorkspaceRepoContext[];
+}
+
+export async function inspectWorkspace(
+  workspaceRoot: string,
+  manifest: WorkspaceManifest,
+): Promise<WorkspaceContext> {
+  // Validate all repos upfront — fail loudly on any bad entry before building context.
+  const validations = await Promise.all(
+    manifest.repos.map(async (entry) => {
+      const repoPath = resolveRepoPath(workspaceRoot, entry);
+      const check = await runCommand('git', ['-C', repoPath, 'rev-parse', '--show-toplevel']);
+      return check.ok
+        ? null
+        : `  [${entry.id}] '${repoPath}' is not a git repository or does not exist`;
+    }),
+  );
+  const errors = validations.filter((e): e is string => e !== null);
+  if (errors.length > 0) {
+    throw new Error(`Workspace repo validation failed:\n${errors.join('\n')}`);
+  }
+
+  const repos = await Promise.all(
+    manifest.repos.map(async (entry) => {
+      const repoPath = resolveRepoPath(workspaceRoot, entry);
+      const ctx = await inspectRepo(repoPath);
+      return { ...ctx, repoId: entry.id };
+    }),
+  );
+  return { workspaceRoot, repos };
 }
 
 export async function inspectRepo(repoRoot: string): Promise<RepoContext> {

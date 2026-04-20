@@ -14,6 +14,7 @@ const RawTaskSchema = z.object({
   implementation_notes: z.string().default(''),
   test_commands: z.array(z.string()).default([]),
   dependencies: z.array(z.string()).default([]),
+  repo_id: z.string().optional(),
 });
 
 const RecommendedCommandsSchema = z.object({
@@ -81,4 +82,25 @@ export function normalizeTasks(output: PlanningOutput): Task[] {
     created_at: now,
     updated_at: now,
   }));
+}
+
+/**
+ * Validate that every task in a workspace plan has a repo_id that belongs to
+ * the declared set. Throws with a descriptive message on the first violation.
+ */
+export function validateWorkspaceTaskRepoIds(tasks: Task[], knownRepoIds: string[]): void {
+  for (const task of tasks) {
+    if (!task.repo_id) {
+      throw new Error(
+        `Task '${task.id}' is missing repo_id. ` +
+          `Each workspace task must set repo_id to one of: ${knownRepoIds.join(', ')}`,
+      );
+    }
+    if (!knownRepoIds.includes(task.repo_id)) {
+      throw new Error(
+        `Task '${task.id}' has unknown repo_id '${task.repo_id}'. ` +
+          `Valid values: ${knownRepoIds.join(', ')}`,
+      );
+    }
+  }
 }

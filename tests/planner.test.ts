@@ -1,13 +1,13 @@
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { rm, readFile } from 'fs/promises';
-import { extractPlanningOutput, normalizeTasks } from '../src/planner/extract.js';
-import { buildPlanningPrompt } from '../src/planner/prompt.js';
+import { extractPlanningOutput, normalizeTasks, validateWorkspaceTaskRepoIds } from '../src/planner/extract.js';
+import { buildPlanningPrompt, buildWorkspacePlanningPrompt } from '../src/planner/prompt.js';
 import { formatRawOutput } from '../src/planner/index.js';
 import { readJson } from '../src/state/persist.js';
 import { ConfigSchema } from '../src/state/schemas.js';
 import { orchestratorPaths } from '../src/state/paths.js';
-import type { RepoContext } from '../src/planner/inspect.js';
+import type { RepoContext, WorkspaceContext } from '../src/planner/inspect.js';
 
 // ─── extractPlanningOutput ────────────────────────────────────────────────────
 
@@ -147,6 +147,156 @@ describe('buildPlanningPrompt', () => {
   test('requests a ```json code block in the response', () => {
     const prompt = buildPlanningPrompt('spec', ctx);
     expect(prompt).toContain('```json');
+  });
+});
+
+// ─── buildWorkspacePlanningPrompt ─────────────────────────────────────────────
+
+describe('buildWorkspacePlanningPrompt', () => {
+  const wsCtx: WorkspaceContext = {
+    workspaceRoot: '/tmp/workspace',
+    repos: [
+      {
+        repoId: 'frontend',
+        repoPath: '/tmp/workspace/frontend',
+        gitLog: 'abc1234 initial commit',
+        topLevelItems: ['src', 'package.json'],
+        packageJson: '{"name": "frontend"}',
+        readme: '# Frontend',
+      },
+      {
+        repoId: 'backend',
+        repoPath: '/tmp/workspace/backend',
+        gitLog: 'def5678 add api',
+        topLevelItems: ['src', 'go.mod'],
+        packageJson: null,
+        readme: null,
+      },
+    ],
+  };
+
+  test('includes workspace root and repo ids', () => {
+    const prompt = buildWorkspacePlanningPrompt('## Spec\nDo it.', wsCtx);
+    expect(prompt).toContain('/tmp/workspace');
+    expect(prompt).toContain('frontend');
+    expect(prompt).toContain('backend');
+  });
+
+  test('includes per-repo path and git log', () => {
+    const prompt = buildWorkspacePlanningPrompt('spec', wsCtx);
+    expect(prompt).toContain('/tmp/workspace/frontend');
+    expect(prompt).toContain('abc1234 initial commit');
+    expect(prompt).toContain('/tmp/workspace/backend');
+    expect(prompt).toContain('def5678 add api');
+  });
+
+  test('labels each repo section with repo_id', () => {
+    const prompt = buildWorkspacePlanningPrompt('spec', wsCtx);
+    expect(prompt).toContain('repo_id: "frontend"');
+    expect(prompt).toContain('repo_id: "backend"');
+  });
+
+  test('includes the spec content', () => {
+    const prompt = buildWorkspacePlanningPrompt('## My Spec\nDo the thing.', wsCtx);
+    expect(prompt).toContain('## My Spec');
+    expect(prompt).toContain('Do the thing.');
+  });
+
+  test('includes package.json for repos that have it', () => {
+    const prompt = buildWorkspacePlanningPrompt('spec', wsCtx);
+    expect(prompt).toContain('"name": "frontend"');
+  });
+
+  test('omits package.json section for repos without it', () => {
+    const prompt = buildWorkspacePlanningPrompt('spec', wsCtx);
+    // backend has no packageJson — its section should not contain a json block for it
+    const backendSection = prompt.split('## Repository: backend')[1] ?? '';
+    const frontendSection = prompt.split('## Repository: backend')[0] ?? '';
+    expect(frontendSection).toContain('```json');      // frontend has it
+    // backend section has no package.json block (next repo section or end of prompt)
+    const backendUpToNextSection = backendSection.split('## Specification')[0] ?? '';
+    expect(backendUpToNextSection).not.toContain('"name":');
+  });
+
+  test('instructs Codex that repo_id is required and lists valid values', () => {
+    const prompt = buildWorkspacePlanningPrompt('spec', wsCtx);
+    expect(prompt).toMatch(/repo_id.*required|Every task MUST include a repo_id/i);
+    expect(prompt).toContain('"frontend"');
+    expect(prompt).toContain('"backend"');
+  });
+
+  test('requests a ```json code block in the response', () => {
+    const prompt = buildWorkspacePlanningPrompt('spec', wsCtx);
+    expect(prompt).toContain('```json');
+  });
+});
+
+// ─── validateWorkspaceTaskRepoIds ─────────────────────────────────────────────
+
+describe('validateWorkspaceTaskRepoIds', () => {
+  const now = new Date().toISOString();
+
+  function makeTask(id: string, repo_id?: string) {
+    return {
+      id,
+      title: 'T',
+      goal: 'G',
+      status: 'pending' as const,
+      priority: 1,
+      allowed_files: [],
+      acceptance_criteria: [],
+      implementation_notes: '',
+      test_commands: [],
+      retry_count: 0,
+      max_retries: 3,
+      created_at: now,
+      updated_at: now,
+      dependencies: [],
+      repo_id,
+    };
+  }
+
+  test('passes when all tasks have valid repo_ids', () => {
+    const tasks = [makeTask('T-1', 'frontend'), makeTask('T-2', 'backend')];
+    expect(() => validateWorkspaceTaskRepoIds(tasks, ['frontend', 'backend'])).not.toThrow();
+  });
+
+  test('throws when a task is missing repo_id', () => {
+    const tasks = [makeTask('T-1', 'frontend'), makeTask('T-2', undefined)];
+    expect(() => validateWorkspaceTaskRepoIds(tasks, ['frontend', 'backend']))
+      .toThrow(/T-2.*missing repo_id/);
+  });
+
+  test('throws when a task has an unknown repo_id', () => {
+    const tasks = [makeTask('T-1', 'unknown-repo')];
+    expect(() => validateWorkspaceTaskRepoIds(tasks, ['frontend', 'backend']))
+      .toThrow(/unknown-repo/);
+  });
+
+  test('passes for an empty task list', () => {
+    expect(() => validateWorkspaceTaskRepoIds([], ['frontend'])).not.toThrow();
+  });
+});
+
+// ─── normalizeTasks preserves repo_id ─────────────────────────────────────────
+
+describe('normalizeTasks with repo_id', () => {
+  test('passes repo_id through to normalized tasks', () => {
+    const planJson = {
+      tasks: [{ id: 'T-1', title: 'x', goal: 'y', priority: 1, repo_id: 'backend' }],
+    };
+    const output = extractPlanningOutput(JSON.stringify(planJson));
+    const tasks = normalizeTasks(output);
+    expect(tasks[0].repo_id).toBe('backend');
+  });
+
+  test('leaves repo_id undefined when absent (single-repo compat)', () => {
+    const planJson = {
+      tasks: [{ id: 'T-1', title: 'x', goal: 'y', priority: 1 }],
+    };
+    const output = extractPlanningOutput(JSON.stringify(planJson));
+    const tasks = normalizeTasks(output);
+    expect(tasks[0].repo_id).toBeUndefined();
   });
 });
 
