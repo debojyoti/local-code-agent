@@ -78,6 +78,25 @@ describe('schemas', () => {
     ).toThrow();
   });
 
+  test('TaskSchema accepts repo_id when present', () => {
+    const task = TaskSchema.parse({
+      id: 'TASK-002', title: 'Multi-repo task', goal: 'Do something',
+      status: 'pending', priority: 1, allowed_files: [], acceptance_criteria: [],
+      test_commands: [], created_at: now, updated_at: now, dependencies: [],
+      repo_id: 'backend',
+    });
+    expect(task.repo_id).toBe('backend');
+  });
+
+  test('TaskSchema leaves repo_id undefined when absent (single-repo compat)', () => {
+    const task = TaskSchema.parse({
+      id: 'TASK-003', title: 'Single-repo task', goal: 'Do something',
+      status: 'pending', priority: 1, allowed_files: [], acceptance_criteria: [],
+      test_commands: [], created_at: now, updated_at: now, dependencies: [],
+    });
+    expect(task.repo_id).toBeUndefined();
+  });
+
   test('ConfigSchema applies defaults', () => {
     const config = ConfigSchema.parse({ repo_path: '/tmp/repo' });
     expect(config.max_retries).toBe(3);

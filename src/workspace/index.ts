@@ -46,3 +46,38 @@ export function resolveRepoPath(workspaceRoot: string, entry: RepoEntry): string
   if (entry.path.startsWith('/')) return entry.path;
   return resolve(join(workspaceRoot, entry.path));
 }
+
+/**
+ * Resolve the filesystem path for the repo a task targets.
+ *
+ * - No repo_id (single-repo mode): returns workspaceRoot as-is.
+ * - repo_id present but no manifest: throws — caller must load the manifest first.
+ * - repo_id present with manifest: looks up the entry and resolves its path.
+ */
+export function resolveTaskRepoPath(
+  workspaceRoot: string,
+  task: { repo_id?: string },
+  manifest?: WorkspaceManifest,
+): string {
+  if (!task.repo_id) {
+    if (manifest) {
+      throw new Error(
+        `Task has no repo_id but a workspace manifest is present — set repo_id to one of: ${manifest.repos.map((r) => r.id).join(', ')}`,
+      );
+    }
+    // Single-repo mode: the root is the repo.
+    return workspaceRoot;
+  }
+  if (!manifest) {
+    throw new Error(
+      `Task has repo_id '${task.repo_id}' but no workspace manifest was provided`,
+    );
+  }
+  const entry = manifest.repos.find((r) => r.id === task.repo_id);
+  if (!entry) {
+    throw new Error(
+      `repo_id '${task.repo_id}' not found in workspace manifest`,
+    );
+  }
+  return resolveRepoPath(workspaceRoot, entry);
+}

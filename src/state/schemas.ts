@@ -30,6 +30,8 @@ export const TaskSchema = z.object({
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
   dependencies: z.array(z.string()),
+  // Which repo this task targets. Absent means single-repo mode (root is the repo).
+  repo_id: z.string().optional(),
 });
 export type Task = z.infer<typeof TaskSchema>;
 

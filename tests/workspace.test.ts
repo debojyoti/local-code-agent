@@ -6,6 +6,7 @@ import {
   readWorkspaceManifest,
   writeWorkspaceManifest,
   resolveRepoPath,
+  resolveTaskRepoPath,
   WorkspaceManifestSchema,
 } from '../src/workspace/index.js';
 
@@ -98,5 +99,48 @@ describe('resolveRepoPath', () => {
   test('resolves dotdot path against workspace root', () => {
     const entry = { id: 'x', path: '../sibling', description: '' };
     expect(resolveRepoPath('/workspace/sub', entry)).toBe('/workspace/sibling');
+  });
+});
+
+// ─── resolveTaskRepoPath ──────────────────────────────────────────────────────
+
+describe('resolveTaskRepoPath', () => {
+  const manifest = WorkspaceManifestSchema.parse({
+    repos: [
+      { id: 'frontend', path: './frontend', description: '' },
+      { id: 'backend', path: '/abs/backend', description: '' },
+    ],
+  });
+
+  test('returns workspaceRoot when task has no repo_id and no manifest (single-repo mode)', () => {
+    expect(resolveTaskRepoPath('/workspace', {})).toBe('/workspace');
+    expect(resolveTaskRepoPath('/workspace', { repo_id: undefined })).toBe('/workspace');
+  });
+
+  test('throws when task has no repo_id but a manifest is present', () => {
+    expect(() => resolveTaskRepoPath('/workspace', {}, manifest))
+      .toThrow(/no repo_id.*workspace manifest is present/);
+    expect(() => resolveTaskRepoPath('/workspace', { repo_id: undefined }, manifest))
+      .toThrow(/no repo_id.*workspace manifest is present/);
+  });
+
+  test('resolves relative repo path from manifest', () => {
+    expect(resolveTaskRepoPath('/workspace', { repo_id: 'frontend' }, manifest))
+      .toBe('/workspace/frontend');
+  });
+
+  test('resolves absolute repo path from manifest', () => {
+    expect(resolveTaskRepoPath('/workspace', { repo_id: 'backend' }, manifest))
+      .toBe('/abs/backend');
+  });
+
+  test('throws when repo_id is set but no manifest provided', () => {
+    expect(() => resolveTaskRepoPath('/workspace', { repo_id: 'frontend' }))
+      .toThrow(/no workspace manifest/);
+  });
+
+  test('throws when repo_id is not found in manifest', () => {
+    expect(() => resolveTaskRepoPath('/workspace', { repo_id: 'unknown' }, manifest))
+      .toThrow(/not found in workspace manifest/);
   });
 });
