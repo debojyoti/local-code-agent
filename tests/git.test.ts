@@ -121,3 +121,36 @@ describe('worktree lifecycle', () => {
     await expect(removeWorktree(repoRoot, taskId)).resolves.not.toThrow();
   });
 });
+
+// ─── Stale metadata ──────────────────────────────────────────────────────────
+
+describe('stale metadata', () => {
+  const taskId = 'TASK-STALE';
+
+  afterEach(async () => {
+    // best-effort cleanup so other tests aren't affected
+    await removeWorktree(repoRoot, taskId).catch(() => {});
+  });
+
+  test('createWorktree throws when worktree directory is gone but metadata remains', async () => {
+    const info = await createWorktree(repoRoot, taskId);
+
+    // Simulate external removal of just the worktree directory (branch stays)
+    await runCommand('git', ['-C', repoRoot, 'worktree', 'remove', '--force', info.worktreePath]);
+    await runCommand('git', ['-C', repoRoot, 'worktree', 'prune']);
+
+    await expect(createWorktree(repoRoot, taskId)).rejects.toThrow(/[Ss]tale/);
+  });
+
+  test('createWorktree throws when branch is gone but metadata remains', async () => {
+    const info = await createWorktree(repoRoot, taskId);
+
+    // Re-attach a fresh worktree so the branch deletion doesn't fail
+    // (already cleaned up in previous test via afterEach + fresh taskId here)
+    // Simulate external branch deletion while worktree still exists
+    await runCommand('git', ['-C', info.worktreePath, 'checkout', '--detach']);
+    await runCommand('git', ['-C', repoRoot, 'branch', '-D', info.branch]);
+
+    await expect(createWorktree(repoRoot, taskId)).rejects.toThrow(/[Ss]tale/);
+  });
+});

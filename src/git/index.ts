@@ -45,9 +45,25 @@ export async function createWorktree(
   const wtPath = taskWorktreePath(repoRoot, taskId);
   const metaPath = worktreeMetaPath(repoRoot, taskId);
 
-  // Resume: metadata already exists means worktree was previously created
+  // Resume: metadata already exists — verify the recorded worktree and branch still exist
   const existing = await readJson(metaPath, WorktreeInfoSchema);
-  if (existing) return existing;
+  if (existing) {
+    const [wtCheck, branchCheck] = await Promise.all([
+      runCommand('git', ['-C', existing.worktreePath, 'rev-parse', '--git-dir']),
+      runCommand('git', ['-C', repoRoot, 'branch', '--list', existing.branch]),
+    ]);
+    const worktreeExists = wtCheck.ok;
+    const branchExists = branchCheck.stdout.trim() !== '';
+    if (!worktreeExists || !branchExists) {
+      throw new Error(
+        `Stale worktree metadata for ${taskId}: ` +
+          `worktree ${worktreeExists ? 'ok' : 'missing'}, ` +
+          `branch ${branchExists ? 'ok' : 'missing'}. ` +
+          `Remove ${metaPath} and re-run to recreate the worktree.`,
+      );
+    }
+    return existing;
+  }
 
   // Capture the base commit so diffs are always relative to task start
   const headResult = await runCommand('git', ['-C', repoRoot, 'rev-parse', 'HEAD']);
