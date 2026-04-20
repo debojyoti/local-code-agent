@@ -48,6 +48,24 @@ export function resolveRepoPath(workspaceRoot: string, entry: RepoEntry): string
 }
 
 /**
+ * Resolve a task's target repo path, loading the workspace manifest from disk
+ * if one exists. In single-repo mode (no `repos.json`), returns `workspaceRoot`.
+ * In workspace mode, the manifest is loaded and the task's `repo_id` is looked up.
+ *
+ * Throws a clear error when:
+ * - the workspace manifest is present but the task has no `repo_id`,
+ * - the task's `repo_id` is not declared in the manifest.
+ */
+export async function resolveRepoPathForTask(
+  workspaceRoot: string,
+  task: { repo_id?: string },
+): Promise<string> {
+  const isWorkspace = await isWorkspaceRoot(workspaceRoot);
+  const manifest = isWorkspace ? await readWorkspaceManifest(workspaceRoot) : undefined;
+  return resolveTaskRepoPath(workspaceRoot, task, manifest);
+}
+
+/**
  * Resolve the filesystem path for the repo a task targets.
  *
  * - No repo_id (single-repo mode): returns workspaceRoot as-is.

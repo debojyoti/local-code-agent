@@ -13,6 +13,7 @@ import { orchestratorPaths } from '../state/paths.js';
 import { join } from 'path';
 import { buildImplementationBrief } from './brief.js';
 import { runChecks } from './checks.js';
+import { resolveRepoPathForTask } from '../workspace/index.js';
 
 export interface RunTaskResult {
   task: Task;
@@ -27,6 +28,9 @@ export interface RunTaskOptions {
 }
 
 export async function runTask(repoRoot: string, taskId: string, opts?: RunTaskOptions): Promise<RunTaskResult> {
+  // `resolvedRepo` is the state root — where `.ai-orchestrator/` lives.
+  // In single-repo mode it is also the git repo; in workspace mode it is the
+  // workspace root and the actual git repo is resolved per task from `repo_id`.
   const resolvedRepo = resolve(repoRoot);
   await appendLog(resolvedRepo, taskId, `run-task: starting`);
 
@@ -36,12 +40,19 @@ export async function runTask(repoRoot: string, taskId: string, opts?: RunTaskOp
     throw new Error(`Task ${taskId} has already passed. Use --force to re-run.`);
   }
 
-  // 2. Create or reuse worktree
+  // 2. Resolve the git repo this task targets. In single-repo mode this equals
+  //    resolvedRepo; in workspace mode it is the child repo declared in repos.json.
+  const targetRepoPath = await resolveRepoPathForTask(resolvedRepo, task);
+  if (task.repo_id) {
+    console.log(`  Target repo: [${task.repo_id}] ${targetRepoPath}`);
+  }
+
+  // 3. Create or reuse worktree (stored under resolvedRepo; tracks targetRepoPath)
   console.log(`  Creating worktree for ${taskId}...`);
-  const worktree = await createWorktree(resolvedRepo, taskId);
+  const worktree = await createWorktree(resolvedRepo, taskId, targetRepoPath);
   console.log(`  Worktree: ${worktree.worktreePath}`);
 
-  // 3. Load config for check commands (best-effort — missing config is handled in runChecks)
+  // 4. Load config for check commands (best-effort — missing config is handled in runChecks)
   const config = await readJson(orchestratorPaths.config(resolvedRepo), ConfigSchema);
 
   // 4. Mark task as running

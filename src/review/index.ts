@@ -8,6 +8,7 @@ import { readJson, writeJson } from '../state/persist.js';
 import { ExecutionResultSchema, type Task, type ReviewResult } from '../state/schemas.js';
 import { buildReviewPrompt } from './prompt.js';
 import { extractReviewResult } from './extract.js';
+import { resolveRepoPathForTask } from '../workspace/index.js';
 
 export interface ReviewRunResult {
   task: Task;
@@ -18,13 +19,21 @@ export interface ReviewRunResult {
 }
 
 export async function runReview(repoRoot: string, taskId: string): Promise<ReviewRunResult> {
+  // `resolvedRepo` is the state root; the git repo Codex should see is resolved
+  // per task from `repo_id` (same as runTask).
   const resolvedRepo = resolve(repoRoot);
   await appendLog(resolvedRepo, taskId, `review: starting`);
 
   // 1. Load task
   const task = await loadTask(resolvedRepo, taskId);
 
-  // 2. Find latest execution result (contains diff, changed_files, checks)
+  // 2. Resolve the git repo this task targets so Codex runs with the correct cwd.
+  const targetRepoPath = await resolveRepoPathForTask(resolvedRepo, task);
+  if (task.repo_id) {
+    console.log(`  Target repo: [${task.repo_id}] ${targetRepoPath}`);
+  }
+
+  // 3. Find latest execution result (contains diff, changed_files, checks)
   const executionResult = await findLatestExecutionResult(resolvedRepo, taskId);
   if (!executionResult) {
     throw new Error(
@@ -52,10 +61,10 @@ export async function runReview(repoRoot: string, taskId: string): Promise<Revie
 
   // From here any unexpected throw must move the task out of 'reviewing'.
   try {
-    // 6. Invoke Codex CLI
+    // 6. Invoke Codex CLI in the target repo (so Codex sees the right files)
     console.log('  Running Codex CLI...');
     const codexResult = await runCommand('codex', ['--quiet', prompt], {
-      cwd: resolvedRepo,
+      cwd: targetRepoPath,
       timeoutMs: 180_000,
     });
 
